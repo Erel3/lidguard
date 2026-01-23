@@ -104,6 +104,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
     guard let event = NSApp.currentEvent else { return }
 
+    // Pre-fetch location before menu blocks run loop
+    theftProtection.refreshLocation()
+
     if event.type == .rightMouseUp {
       handleRightClick()
     } else {
@@ -228,8 +231,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 // MARK: - TheftProtectionDelegate
 extension AppDelegate: TheftProtectionDelegate {
   func theftProtectionStateDidChange(_ service: TheftProtectionService, state: ProtectionState) {
-    DispatchQueue.main.async { [weak self] in
+    CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { [weak self] in
+      // Force close menu if open (critical for theft mode activation)
+      if state == .theftMode {
+        self?.menu.cancelTracking()
+      }
       self?.updateStatus()
     }
+    CFRunLoopWakeUp(CFRunLoopGetMain())
   }
 }

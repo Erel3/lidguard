@@ -44,15 +44,17 @@ final class LidMonitorService {
 
     if let last = lastState {
       if !last && currentState {
-        DispatchQueue.main.async { [weak self] in
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { [weak self] in
           guard let self = self else { return }
           self.delegate?.lidMonitorDidDetectClose(self)
         }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
       } else if last && !currentState {
-        DispatchQueue.main.async { [weak self] in
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { [weak self] in
           guard let self = self else { return }
           self.delegate?.lidMonitorDidDetectOpen(self)
         }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
       }
     }
 

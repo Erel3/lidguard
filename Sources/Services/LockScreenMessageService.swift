@@ -45,7 +45,12 @@ final class LockScreenMessageService {
       window.orderFrontRegardless()
     }
     showTask = task
-    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: task)
+    DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+      CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) {
+        task.perform()
+      }
+      CFRunLoopWakeUp(CFRunLoopGetMain())
+    }
   }
 
   func hide() {

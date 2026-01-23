@@ -199,6 +199,10 @@ final class TheftProtectionService {
     }
   }
 
+  func refreshLocation() {
+    deviceInfoCollector.warmUp()
+  }
+
   func sendTestAlert() {
     let keyboard: TelegramKeyboard = state == .disabled ? .disabled : .enabled
     deviceInfoCollector.collect { [weak self] info in

@@ -10,8 +10,8 @@ protocol LocationProvider {
 final class LocationService: NSObject, LocationProvider {
   private let locationManager = CLLocationManager()
   private var completion: ((CLLocation?) -> Void)?
-  private var timeoutTimer: Timer?
   private let timeout: TimeInterval
+  private var cachedLocation: CLLocation?
 
   init(timeout: TimeInterval = 5.0) {
     self.timeout = timeout
@@ -54,18 +54,19 @@ final class LocationService: NSObject, LocationProvider {
   }
 
   private func startTimeout() {
-    DispatchQueue.main.async { [weak self] in
+    // Use background queue for timeout - main run loop may be blocked by menu
+    DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in
       guard let self = self else { return }
-      self.timeoutTimer?.invalidate()
-      self.timeoutTimer = Timer.scheduledTimer(withTimeInterval: self.timeout, repeats: false) { [weak self] _ in
-        self?.complete(with: self?.locationManager.location)
+      // Complete with cached location if still waiting
+      // Use cachedLocation (not locationManager.location) to avoid CLLocationManager
+      // internal @synchronized deadlock when accessed from background thread
+      if self.completion != nil {
+        self.complete(with: self.cachedLocation)
       }
     }
   }
 
   private func complete(with location: CLLocation?) {
-    timeoutTimer?.invalidate()
-    timeoutTimer = nil
     completion?(location)
     completion = nil
   }
@@ -75,6 +76,7 @@ final class LocationService: NSObject, LocationProvider {
 extension LocationService: CLLocationManagerDelegate {
   func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
     if let location = locations.last {
+      cachedLocation = location
       ActivityLog.shared.logAsync(.location, "Location updated: \(String(format: "%.4f", location.coordinate.latitude)), \(String(format: "%.4f", location.coordinate.longitude))")
     }
     complete(with: locations.last)

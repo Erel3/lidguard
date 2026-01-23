@@ -25,7 +25,7 @@ final class PowerMonitorService {
       Logger.power.error("Failed to create power notification source")
       return
     }
-    CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+    CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
 
     // Initialize state
     wasCharging = isCharging()
@@ -34,7 +34,7 @@ final class PowerMonitorService {
 
   func stop() {
     if let source = runLoopSource {
-      CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
+      CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
       runLoopSource = nil
     }
     wasCharging = nil

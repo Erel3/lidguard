@@ -102,9 +102,9 @@ final class TelegramCommandService {
       if let command = parseCommand(text) {
         Logger.telegram.info("Received command: \(text)")
         ActivityLog.shared.logAsync(.telegram, "Received command: \(text)")
-        DispatchQueue.main.async { [weak self] in
-          self?.delegate?.telegramCommandReceived(command)
-        }
+        // Call delegate directly on background queue - no main queue needed
+        // This avoids blocking when NSMenu is open
+        delegate?.telegramCommandReceived(command)
       }
     }
   }

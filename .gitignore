@@ -1,0 +1,18 @@
+# Swift
+.build/
+.swiftpm/
+
+# Build artifacts
+dist/
+*.app
+
+# macOS
+.DS_Store
+
+# IDE
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+
+# Config (credentials)
+.config/

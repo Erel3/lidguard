@@ -55,7 +55,9 @@ final class LockScreenMessageService {
 
   func hide() {
     showTask?.cancel()
-    window?.orderOut(nil)
+    DispatchQueue.main.async { [weak self] in
+      self?.window?.orderOut(nil)
+    }
   }
 
   private func ensureWindow() -> NSWindow {

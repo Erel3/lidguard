@@ -35,6 +35,7 @@ final class TheftProtectionService {
   private let commandService: TelegramCommandService
   private let sleepWakeService: SleepWakeService
   private let powerMonitor: PowerMonitorService
+  private let powerButtonMonitor = PowerButtonMonitor()
   private let pmsetService = PmsetService.shared
 
   private var trackingTimer: DispatchSourceTimer?
@@ -65,6 +66,7 @@ final class TheftProtectionService {
     self.commandService.delegate = self
     self.sleepWakeService.delegate = self
     self.powerMonitor.delegate = self
+    self.powerButtonMonitor.delegate = self
   }
 
   func start() {
@@ -87,6 +89,7 @@ final class TheftProtectionService {
     pmsetService.enable()
     lidMonitor.start()
     powerMonitor.start()
+    powerButtonMonitor.start()
     Logger.theft.info("Protection enabled")
     ActivityLog.shared.logAsync(.armed, "Protection enabled")
 
@@ -107,6 +110,7 @@ final class TheftProtectionService {
     state = .disabled
     lidMonitor.stop()
     powerMonitor.stop()
+    powerButtonMonitor.stop()
     sleepPrevention.disable()
     pmsetService.disable()
     Logger.theft.info("Protection disabled")
@@ -213,6 +217,22 @@ final class TheftProtectionService {
       )
     }
     ActivityLog.shared.logAsync(.system, "Test alert sent")
+  }
+
+  func sendShutdownAlert(blocked: Bool) {
+    let title = blocked ? "SHUTDOWN BLOCKED" : "POWER BUTTON PRESSED"
+    let subtitle = blocked ? "Someone tried to shut down!" : "Device may be force-powered off!"
+
+    deviceInfoCollector.collect { [weak self] info in
+      guard let self = self else { return }
+      self.notificationService.send(
+        message: "🚨 <b>\(title)</b>\n\n⚠️ \(subtitle)\n\n\(info.formattedMessage)",
+        keyboard: self.state == .theftMode ? .theftMode : .enabled,
+        completion: nil
+      )
+    }
+
+    pushover.send(message: "🚨 \(title) - \(subtitle)")
   }
 
   private func startTracking() {
@@ -346,5 +366,14 @@ extension TheftProtectionService: PowerMonitorDelegate {
     guard state == .enabled else { return }
     ActivityLog.shared.logAsync(.trigger, "Power disconnected detected")
     activateTheftMode(trigger: .powerDisconnected)
+  }
+}
+
+// MARK: - PowerButtonDelegate
+extension TheftProtectionService: PowerButtonDelegate {
+  func powerButtonPressed() {
+    guard state != .disabled else { return }
+    ActivityLog.shared.logAsync(.trigger, "Power button pressed detected")
+    sendShutdownAlert(blocked: false)
   }
 }

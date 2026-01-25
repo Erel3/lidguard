@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private let theftProtection = TheftProtectionService()
   private let authService = BiometricAuthService()
   private let pmsetService = PmsetService.shared
+  private var allowQuit = false  // Set true after Touch ID authentication
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     setupMainMenu()
@@ -21,12 +22,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     ActivityLog.shared.logAsync(.system, "LidGuard v\(Config.App.version) started")
 
+    // Start with no Dock icon (protection disabled)
+    NSApp.setActivationPolicy(.accessory)
+
     // Show settings on first launch if not configured
     if !SettingsService.shared.isConfigured() {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
         self.showSettings()
       }
     }
+  }
+
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    // Allow quit if user authenticated with Touch ID
+    if allowQuit {
+      return .terminateNow
+    }
+
+    // Allow quit if protection disabled
+    if theftProtection.state == .disabled {
+      return .terminateNow
+    }
+
+    // Protection is enabled - block termination and alert
+    ActivityLog.shared.logAsync(.trigger, "Shutdown/quit BLOCKED")
+    theftProtection.sendShutdownAlert(blocked: true)
+
+    // This will show system dialog: "LidGuard is preventing shutdown"
+    // User must click Cancel or we get force-killed after timeout
+    return .terminateCancel
   }
 
   private func setupMainMenu() {
@@ -195,8 +219,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   @objc private func quitApp() {
-    authService.authenticate(reason: "Authenticate to quit \(Config.App.name)") { success in
+    authService.authenticate(reason: "Authenticate to quit \(Config.App.name)") { [weak self] success in
       if success {
+        self?.allowQuit = true
         NSApplication.shared.terminate(nil)
       }
     }
@@ -237,6 +262,11 @@ extension AppDelegate: TheftProtectionDelegate {
         self?.menu.cancelTracking()
       }
       self?.updateStatus()
+
+      // Show Dock icon when protection enabled (required to block shutdown)
+      // Hide Dock icon when disabled (cleaner UX)
+      let policy: NSApplication.ActivationPolicy = (state == .disabled) ? .accessory : .regular
+      NSApp.setActivationPolicy(policy)
     }
     CFRunLoopWakeUp(CFRunLoopGetMain())
   }

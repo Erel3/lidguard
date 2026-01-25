@@ -8,16 +8,9 @@ protocol AuthenticationService {
 final class BiometricAuthService: AuthenticationService {
   func authenticate(reason: String, completion: @escaping (Bool) -> Void) {
     let context = LAContext()
-    var error: NSError?
 
-    let policy: LAPolicy = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
-      ? .deviceOwnerAuthenticationWithBiometrics
-      : .deviceOwnerAuthentication
-
-    context.evaluatePolicy(policy, localizedReason: reason) { success, authError in
-      if let authError = authError {
-        print("[BiometricAuthService] Error: \(authError.localizedDescription)")
-      }
+    // Use deviceOwnerAuthentication to allow both Touch ID and password fallback
+    context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, _ in
       DispatchQueue.main.async {
         completion(success)
       }

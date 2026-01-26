@@ -4,7 +4,7 @@ BUILD_DIR = .build/release
 VERSION_FILE = VERSION
 BUMP ?= patch
 
-.PHONY: build bundle bundle-prod clean install run version
+.PHONY: build bundle bundle-prod clean install run version icon
 
 # Read current version
 VERSION := $(shell cat $(VERSION_FILE) 2>/dev/null || echo "1.0.0")
@@ -63,6 +63,9 @@ bump-version:
 	esac; \
 	echo "$$MAJOR.$$MINOR.$$PATCH" > $(VERSION_FILE); \
 	echo "Version: $$MAJOR.$$MINOR.$$PATCH-dev"
+
+icon:
+	swift Scripts/generate_icon.swift
 
 clean:
 	rm -rf .build dist

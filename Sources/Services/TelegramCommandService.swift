@@ -45,7 +45,7 @@ final class TelegramCommandService {
     }
     timer?.resume()
     Logger.telegram.info("Command polling started")
-    ActivityLog.shared.logAsync(.telegram, "Command polling started")
+    ActivityLog.logAsync(.telegram, "Command polling started")
   }
 
   func stop() {
@@ -101,7 +101,7 @@ final class TelegramCommandService {
 
       if let command = parseCommand(text) {
         Logger.telegram.info("Received command: \(text)")
-        ActivityLog.shared.logAsync(.telegram, "Received command: \(text)")
+        ActivityLog.logAsync(.telegram, "Received command: \(text)")
         // Call delegate directly on background queue - no main queue needed
         // This avoids blocking when NSMenu is open
         delegate?.telegramCommandReceived(command)

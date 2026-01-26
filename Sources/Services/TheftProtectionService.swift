@@ -84,14 +84,17 @@ final class TheftProtectionService {
   func enableProtection(notify: Bool = true) {
     guard state == .disabled else { return }
 
+    let settings = SettingsService.shared
     state = .enabled
-    sleepPrevention.enable()
-    pmsetService.enable()
-    lidMonitor.start()
-    powerMonitor.start()
-    powerButtonMonitor.start()
+    if settings.behaviorSleepPrevention {
+      sleepPrevention.enable()
+      pmsetService.enable()
+    }
+    if settings.triggerLidClose { lidMonitor.start() }
+    if settings.triggerPowerDisconnect { powerMonitor.start() }
+    if settings.triggerPowerButton { powerButtonMonitor.start() }
     Logger.theft.info("Protection enabled")
-    ActivityLog.shared.logAsync(.armed, "Protection enabled")
+    ActivityLog.logAsync(.armed, "Protection enabled")
 
     if notify {
       notificationService.send(
@@ -116,7 +119,7 @@ final class TheftProtectionService {
     Logger.theft.info("Protection disabled")
 
     let method = remote ? "Telegram" : "Touch ID"
-    ActivityLog.shared.logAsync(.disarmed, "Protection disabled via \(method)")
+    ActivityLog.logAsync(.disarmed, "Protection disabled via \(method)")
 
     notificationService.send(
       message: "🔴 <b>PROTECTION DISABLED</b>\n\nDisabled via \(method).",
@@ -134,16 +137,18 @@ final class TheftProtectionService {
     currentTrigger = trigger
     updateCount = 0
     Logger.theft.warning("THEFT MODE ACTIVATED - \(trigger.description)")
-    ActivityLog.shared.logAsync(.theft, "THEFT MODE ACTIVATED - \(trigger.description)")
+    ActivityLog.logAsync(.theft, "THEFT MODE ACTIVATED - \(trigger.description)")
 
     // Lock screen and show message
-    lockScreen()
-    LockScreenMessageService.shared.show(
-      message: "STOLEN DEVICE",
-      onUnlock: { [weak self] in
-        self?.deactivateTheftMode()
-      }
-    )
+    if SettingsService.shared.behaviorLockScreen {
+      lockScreen()
+      LockScreenMessageService.shared.show(
+        message: "STOLEN DEVICE",
+        onUnlock: { [weak self] in
+          self?.deactivateTheftMode()
+        }
+      )
+    }
 
     // Immediate Pushover alert (fast)
     pushover.send(message: "🚨 THEFT MODE ACTIVATED - \(trigger.description)")
@@ -166,7 +171,7 @@ final class TheftProtectionService {
     Logger.theft.info("Theft mode deactivated")
 
     let method = remote ? "Telegram" : "Touch ID"
-    ActivityLog.shared.logAsync(.theft, "Theft mode deactivated via \(method)")
+    ActivityLog.logAsync(.theft, "Theft mode deactivated via \(method)")
 
     notificationService.send(
       message: "✅ <b>THEFT MODE DEACTIVATED</b>\n\nOwner authenticated via \(method).",
@@ -216,7 +221,7 @@ final class TheftProtectionService {
         completion: nil
       )
     }
-    ActivityLog.shared.logAsync(.system, "Test alert sent")
+    ActivityLog.logAsync(.system, "Test alert sent")
   }
 
   func sendShutdownAlert(blocked: Bool) {
@@ -262,7 +267,7 @@ final class TheftProtectionService {
         prefix = "🚨 <b>THEFT MODE ACTIVATED</b>\n⚠️ <b>Trigger:</b> \(reason)\n\n"
       case .tracking:
         prefix = "📡 <b>TRACKING UPDATE #\(self.updateCount)</b>\n\n"
-        ActivityLog.shared.logAsync(.theft, "Tracking update #\(self.updateCount) sent")
+        ActivityLog.logAsync(.theft, "Tracking update #\(self.updateCount) sent")
       }
 
       self.notificationService.send(
@@ -292,13 +297,14 @@ final class TheftProtectionService {
 // MARK: - LidMonitorDelegate
 extension TheftProtectionService: LidMonitorDelegate {
   func lidMonitorDidDetectClose(_ monitor: LidMonitorService) {
-    ActivityLog.shared.logAsync(.trigger, "Lid closed detected")
+    guard SettingsService.shared.triggerLidClose else { return }
+    ActivityLog.logAsync(.trigger, "Lid closed detected")
     activateTheftMode(trigger: .lidClosed)
   }
 
   func lidMonitorDidDetectOpen(_ monitor: LidMonitorService) {
     Logger.theft.info("Lid opened - theft mode still active")
-    ActivityLog.shared.logAsync(.trigger, "Lid opened - theft mode still active")
+    ActivityLog.logAsync(.trigger, "Lid opened - theft mode still active")
   }
 }
 
@@ -316,6 +322,7 @@ extension TheftProtectionService: TelegramCommandDelegate {
       disableProtection(remote: true)
     case .alarm:
       guard state == .theftMode else { return }
+      guard SettingsService.shared.behaviorAlarm else { return }
       AlarmAudioManager.shared.play()
       notificationService.send(
         message: "🔊 <b>ALARM ACTIVATED</b>",
@@ -337,19 +344,21 @@ extension TheftProtectionService: TelegramCommandDelegate {
 // MARK: - SleepWakeDelegate
 extension TheftProtectionService: SleepWakeDelegate {
   func systemWillSleep() {
-    ActivityLog.shared.logAsync(.power, "System will sleep")
+    ActivityLog.logAsync(.power, "System will sleep")
     // Check lid right before sleep (only if enabled)
-    if state == .enabled && lidMonitor.isClosed {
+    if state == .enabled && SettingsService.shared.triggerLidClose && lidMonitor.isClosed {
       activateTheftMode(trigger: .lidClosed)
     }
   }
 
   func systemDidWake() {
-    ActivityLog.shared.logAsync(.power, "System did wake")
+    ActivityLog.logAsync(.power, "System did wake")
     // On any wake (including DarkWake), check lid and re-enable sleep prevention
     if state == .enabled {
-      sleepPrevention.enable()
-      if lidMonitor.isClosed {
+      if SettingsService.shared.behaviorSleepPrevention {
+        sleepPrevention.enable()
+      }
+      if SettingsService.shared.triggerLidClose && lidMonitor.isClosed {
         activateTheftMode(trigger: .lidClosed)
       }
     }
@@ -364,7 +373,8 @@ extension TheftProtectionService: SleepWakeDelegate {
 extension TheftProtectionService: PowerMonitorDelegate {
   func powerMonitorDidDetectDisconnect(_ monitor: PowerMonitorService) {
     guard state == .enabled else { return }
-    ActivityLog.shared.logAsync(.trigger, "Power disconnected detected")
+    guard SettingsService.shared.triggerPowerDisconnect else { return }
+    ActivityLog.logAsync(.trigger, "Power disconnected detected")
     activateTheftMode(trigger: .powerDisconnected)
   }
 }
@@ -373,7 +383,8 @@ extension TheftProtectionService: PowerMonitorDelegate {
 extension TheftProtectionService: PowerButtonDelegate {
   func powerButtonPressed() {
     guard state != .disabled else { return }
-    ActivityLog.shared.logAsync(.trigger, "Power button pressed detected")
+    guard SettingsService.shared.triggerPowerButton else { return }
+    ActivityLog.logAsync(.trigger, "Power button pressed detected")
     sendShutdownAlert(blocked: false)
   }
 }

@@ -34,7 +34,7 @@ final class PowerButtonMonitor {
     }
 
     Logger.power.info("Power button monitor started")
-    ActivityLog.shared.logAsync(.system, "Power button monitor started")
+    ActivityLog.logAsync(.system, "Power button monitor started")
   }
 
   func stop() {
@@ -63,7 +63,7 @@ final class PowerButtonMonitor {
     let isPowerButton = (subtype == 16) || (subtype == 8 && keyCode == 0x7F)
 
     if isPowerButton {
-      ActivityLog.shared.logAsync(.trigger, "Power button pressed")
+      ActivityLog.logAsync(.trigger, "Power button pressed")
       delegate?.powerButtonPressed()
     }
   }

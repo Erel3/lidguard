@@ -24,6 +24,7 @@ enum KeychainService {
     }
   }
 
+  @discardableResult
   static func save(key: String, value: String) -> Bool {
     var credentials = loadCredentials()
     credentials[key] = value

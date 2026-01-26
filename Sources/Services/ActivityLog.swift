@@ -128,9 +128,9 @@ final class ActivityLog: ObservableObject {
 
 // Non-MainActor convenience for logging from any thread
 extension ActivityLog {
-  nonisolated func logAsync(_ category: LogCategory, _ message: String) {
+  nonisolated static func logAsync(_ category: LogCategory, _ message: String) {
     Task { @MainActor in
-      self.log(category, message)
+      shared.log(category, message)
     }
   }
 }

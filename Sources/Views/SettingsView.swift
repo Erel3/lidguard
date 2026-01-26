@@ -1,22 +1,59 @@
 import Contacts
 import SwiftUI
 
+enum SettingsSection: String, CaseIterable, Identifiable {
+  case general, triggers, protection, notifications
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .general: return "General"
+    case .triggers: return "Triggers"
+    case .protection: return "Protection"
+    case .notifications: return "Notifications"
+    }
+  }
+
+  var icon: String {
+    switch self {
+    case .general: return "gear"
+    case .triggers: return "bolt.fill"
+    case .protection: return "shield.fill"
+    case .notifications: return "bell.fill"
+    }
+  }
+}
+
 struct SettingsView: View {
+  // General
   @State private var contactName: String = ""
   @State private var contactPhone: String = ""
+  @State private var startAtLogin: Bool = false
 
+  // Triggers
+  @State private var triggerLidClose: Bool = true
+  @State private var triggerPowerDisconnect: Bool = true
+  @State private var triggerPowerButton: Bool = false
+
+  // Protection
+  @State private var behaviorSleepPrevention: Bool = true
+  @State private var sleepPreventionInstalled: Bool = false
+  @State private var behaviorShutdownBlocking: Bool = true
+  @State private var behaviorLockScreen: Bool = true
+  @State private var behaviorAlarm: Bool = true
+  @State private var selectedAlarmSound: String = "Sosumi"
+
+  // Notifications
   @State private var telegramBotToken: String = ""
   @State private var telegramChatId: String = ""
   @State private var telegramEnabled: Bool = true
-
   @State private var pushoverUserKey: String = ""
   @State private var pushoverApiToken: String = ""
   @State private var pushoverEnabled: Bool = true
 
+  @State private var selectedSection: SettingsSection? = .general
   @State private var showingResetConfirmation = false
-  @State private var startAtLogin: Bool = false
-  @State private var sleepPreventionInstalled: Bool = false
-  @State private var selectedAlarmSound: String = "Sosumi"
   @Environment(\.dismiss) private var dismiss
 
   private let alarmSounds = [
@@ -30,6 +67,72 @@ struct SettingsView: View {
   private let loginItem = LoginItemService.shared
 
   var body: some View {
+    NavigationSplitView {
+      List(selection: $selectedSection) {
+        ForEach(SettingsSection.allCases) { section in
+          Label(section.title, systemImage: section.icon)
+            .tag(section)
+        }
+      }
+      .listStyle(.sidebar)
+      .navigationSplitViewColumnWidth(min: 150, ideal: 180, max: 200)
+    } detail: {
+      switch selectedSection {
+      case .general:
+        generalTab
+      case .triggers:
+        triggersTab
+      case .protection:
+        protectionTab
+      case .notifications:
+        notificationsTab
+      case nil:
+        generalTab
+      }
+    }
+    .frame(width: 600, height: 460)
+    .onAppear(perform: loadSettings)
+    .alert("Reset All Settings?", isPresented: $showingResetConfirmation) {
+      Button("Cancel", role: .cancel) {}
+      Button("Reset", role: .destructive) {
+        resetSettings()
+      }
+    } message: {
+      Text("This will clear all stored credentials and preferences.")
+    }
+    .toolbar {
+      ToolbarItem(placement: .cancellationAction) {
+        if #available(macOS 26.0, *) {
+          Button("Cancel") {
+            dismiss()
+          }
+          .buttonStyle(.glass)
+        } else {
+          Button("Cancel") {
+            dismiss()
+          }
+        }
+      }
+      ToolbarItem(placement: .confirmationAction) {
+        if #available(macOS 26.0, *) {
+          Button("Save") {
+            saveSettings()
+            dismiss()
+          }
+          .buttonStyle(.glassProminent)
+        } else {
+          Button("Save") {
+            saveSettings()
+            dismiss()
+          }
+        }
+      }
+    }
+  }
+
+  // MARK: - General Tab
+
+  private var generalTab: some View {
     Form {
       Section {
         LabeledContent("Name") {
@@ -52,6 +155,116 @@ struct SettingsView: View {
         Text("Contact Information")
       }
 
+      Section {
+        Toggle("Start at Login", isOn: $startAtLogin)
+          .onChange(of: startAtLogin) { _, newValue in
+            toggleLoginItem(newValue)
+          }
+      }
+
+      Section {
+        HStack {
+          Spacer()
+          if #available(macOS 26.0, *) {
+            Button("Reset All Settings", role: .destructive) {
+              showingResetConfirmation = true
+            }
+            .buttonStyle(.glass)
+          } else {
+            Button("Reset All Settings", role: .destructive) {
+              showingResetConfirmation = true
+            }
+            .buttonStyle(.borderless)
+          }
+          Spacer()
+        }
+      }
+
+      Section {
+        HStack {
+          Spacer()
+          Text("\(Config.App.name) v\(Config.App.version)")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Spacer()
+        }
+      }
+    }
+    .formStyle(.grouped)
+  }
+
+  // MARK: - Triggers Tab
+
+  private var triggersTab: some View {
+    Form {
+      Section {
+        Toggle("Lid close detection", isOn: $triggerLidClose)
+        Toggle("Power disconnect detection", isOn: $triggerPowerDisconnect)
+        Toggle("Power button detection", isOn: $triggerPowerButton)
+      } header: {
+        Text("Theft Mode Triggers")
+      } footer: {
+        Text("Power button detection requires Accessibility permission.")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .formStyle(.grouped)
+  }
+
+  // MARK: - Protection Tab
+
+  private var protectionTab: some View {
+    Form {
+      Section {
+        Toggle("Sleep prevention (IOPMAssertion)", isOn: $behaviorSleepPrevention)
+        LabeledContent("Sleep Prevention (pmset)") {
+          if #available(macOS 26.0, *) {
+            Button(sleepPreventionInstalled ? "Uninstall" : "Install") {
+              toggleSleepPrevention()
+            }
+            .buttonStyle(.glass)
+          } else {
+            Button(sleepPreventionInstalled ? "Uninstall" : "Install") {
+              toggleSleepPrevention()
+            }
+            .buttonStyle(.borderless)
+          }
+        }
+      } header: {
+        Text("Sleep")
+      }
+
+      Section {
+        Toggle("Shutdown blocking", isOn: $behaviorShutdownBlocking)
+        Toggle("Lock screen message", isOn: $behaviorLockScreen)
+      } header: {
+        Text("Defense")
+      }
+
+      Section {
+        Toggle("Alarm enabled", isOn: $behaviorAlarm)
+        if behaviorAlarm {
+          Picker("Alarm Sound", selection: $selectedAlarmSound) {
+            ForEach(alarmSounds, id: \.self) { sound in
+              Text(sound).tag(sound)
+            }
+          }
+          .onChange(of: selectedAlarmSound) { _, newValue in
+            NSSound(named: newValue)?.play()
+          }
+        }
+      } header: {
+        Text("Alarm")
+      }
+    }
+    .formStyle(.grouped)
+  }
+
+  // MARK: - Notifications Tab
+
+  private var notificationsTab: some View {
+    Form {
       Section {
         LabeledContent("Bot Token") {
           SecureField("", text: $telegramBotToken)
@@ -79,76 +292,11 @@ struct SettingsView: View {
       } header: {
         Text("Pushover")
       }
-
-      Section {
-        Toggle("Start at Login", isOn: $startAtLogin)
-          .onChange(of: startAtLogin) { _, newValue in
-            toggleLoginItem(newValue)
-          }
-        LabeledContent("Sleep Prevention") {
-          Button(sleepPreventionInstalled ? "Uninstall" : "Install") {
-            toggleSleepPrevention()
-          }
-          .buttonStyle(.borderless)
-        }
-        Picker("Alarm Sound", selection: $selectedAlarmSound) {
-          ForEach(alarmSounds, id: \.self) { sound in
-            Text(sound).tag(sound)
-          }
-        }
-        .onChange(of: selectedAlarmSound) { _, newValue in
-          NSSound(named: newValue)?.play()
-        }
-      } header: {
-        Text("System")
-      }
-
-      Section {
-        HStack {
-          Spacer()
-          Button("Reset All Settings", role: .destructive) {
-            showingResetConfirmation = true
-          }
-          .buttonStyle(.borderless)
-          Spacer()
-        }
-      }
-
-      Section {
-        HStack {
-          Spacer()
-          Text("\(Config.App.name) v\(Config.App.version)")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-          Spacer()
-        }
-      }
     }
     .formStyle(.grouped)
-    .frame(width: 400, height: 560)
-    .onAppear(perform: loadSettings)
-    .alert("Reset All Settings?", isPresented: $showingResetConfirmation) {
-      Button("Cancel", role: .cancel) {}
-      Button("Reset", role: .destructive) {
-        resetSettings()
-      }
-    } message: {
-      Text("This will clear all stored credentials and preferences.")
-    }
-    .toolbar {
-      ToolbarItem(placement: .cancellationAction) {
-        Button("Cancel") {
-          dismiss()
-        }
-      }
-      ToolbarItem(placement: .confirmationAction) {
-        Button("Save") {
-          saveSettings()
-          dismiss()
-        }
-      }
-    }
   }
+
+  // MARK: - Actions
 
   private func loadSettings() {
     contactName = settings.contactName ?? ""
@@ -162,6 +310,13 @@ struct SettingsView: View {
     startAtLogin = loginItem.isEnabled
     sleepPreventionInstalled = pmset.isInstalled()
     selectedAlarmSound = settings.alarmSound
+    triggerLidClose = settings.triggerLidClose
+    triggerPowerDisconnect = settings.triggerPowerDisconnect
+    triggerPowerButton = settings.triggerPowerButton
+    behaviorSleepPrevention = settings.behaviorSleepPrevention
+    behaviorShutdownBlocking = settings.behaviorShutdownBlocking
+    behaviorLockScreen = settings.behaviorLockScreen
+    behaviorAlarm = settings.behaviorAlarm
   }
 
   private func saveSettings() {
@@ -174,14 +329,21 @@ struct SettingsView: View {
     settings.pushoverApiToken = pushoverApiToken.isEmpty ? nil : pushoverApiToken
     settings.pushoverEnabled = pushoverEnabled
     settings.alarmSound = selectedAlarmSound
+    settings.triggerLidClose = triggerLidClose
+    settings.triggerPowerDisconnect = triggerPowerDisconnect
+    settings.triggerPowerButton = triggerPowerButton
+    settings.behaviorSleepPrevention = behaviorSleepPrevention
+    settings.behaviorShutdownBlocking = behaviorShutdownBlocking
+    settings.behaviorLockScreen = behaviorLockScreen
+    settings.behaviorAlarm = behaviorAlarm
 
-    ActivityLog.shared.logAsync(.system, "Settings saved")
+    ActivityLog.logAsync(.system, "Settings saved")
   }
 
   private func resetSettings() {
     settings.resetAll()
     loadSettings()
-    ActivityLog.shared.logAsync(.system, "All settings reset")
+    ActivityLog.logAsync(.system, "All settings reset")
   }
 
   private func toggleSleepPrevention() {

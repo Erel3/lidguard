@@ -18,9 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     setupMenuBar()
     theftProtection.delegate = self
     theftProtection.start()
-    SettingsService.shared.requestContactsAccessIfNeeded {}
 
-    ActivityLog.shared.logAsync(.system, "LidGuard v\(Config.App.version) started")
+    ActivityLog.logAsync(.system, "LidGuard v\(Config.App.version) started")
 
     // Start with no Dock icon (protection disabled)
     NSApp.setActivationPolicy(.accessory)
@@ -44,8 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return .terminateNow
     }
 
-    // Protection is enabled - block termination and alert
-    ActivityLog.shared.logAsync(.trigger, "Shutdown/quit BLOCKED")
+    // In theft mode, always block termination
+    // In enabled state, check shutdownBlocking setting
+    if theftProtection.state == .enabled && !SettingsService.shared.behaviorShutdownBlocking {
+      return .terminateNow
+    }
+
+    ActivityLog.logAsync(.trigger, "Shutdown/quit BLOCKED")
     theftProtection.sendShutdownAlert(blocked: true)
 
     // This will show system dialog: "LidGuard is preventing shutdown"
@@ -91,22 +95,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu = NSMenu()
     menu.delegate = self
 
-    statusMenuItem = NSMenuItem(title: "✅ Status: Monitoring", action: nil, keyEquivalent: "")
+    statusMenuItem = NSMenuItem(title: "Status: Monitoring", action: nil, keyEquivalent: "")
     menu.addItem(statusMenuItem)
 
     menu.addItem(.separator())
 
-    toggleMenuItem = NSMenuItem(title: "🔴 Disable Protection", action: #selector(toggleProtection), keyEquivalent: "d")
+    toggleMenuItem = NSMenuItem(title: "Disable Protection", action: #selector(toggleProtection), keyEquivalent: "d")
     toggleMenuItem.target = self
     menu.addItem(toggleMenuItem)
 
     testMenuItem = NSMenuItem(title: "Send Test Alert", action: #selector(sendTestAlert), keyEquivalent: "")
     testMenuItem.target = self
+    testMenuItem.image = menuSymbol("paperplane", color: .systemBlue)
     testMenuItem.isHidden = true
     menu.addItem(testMenuItem)
 
     activityLogMenuItem = NSMenuItem(title: "Activity Log", action: #selector(showActivityLog), keyEquivalent: "")
     activityLogMenuItem.target = self
+    activityLogMenuItem.image = menuSymbol("list.bullet.rectangle", color: .secondaryLabelColor)
     activityLogMenuItem.isHidden = true
     menu.addItem(activityLogMenuItem)
 
@@ -114,12 +120,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     let settingsItem = NSMenuItem(title: "Settings... (Touch ID)", action: #selector(openSettings), keyEquivalent: ",")
     settingsItem.target = self
+    settingsItem.image = menuSymbol("gearshape", color: .secondaryLabelColor)
     menu.addItem(settingsItem)
 
     menu.addItem(.separator())
 
     let quitItem = NSMenuItem(title: "Quit (Touch ID)", action: #selector(quitApp), keyEquivalent: "q")
     quitItem.target = self
+    quitItem.image = menuSymbol("power", color: .secondaryLabelColor)
     menu.addItem(quitItem)
 
     updateStatus()
@@ -169,27 +177,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     activityLogMenuItem.isHidden = !optionPressed
   }
 
+  private func menuSymbol(_ name: String, color: NSColor) -> NSImage? {
+    guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil) else { return nil }
+    let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+      .applying(.init(paletteColors: [color]))
+    return image.withSymbolConfiguration(config)
+  }
+
   private func updateStatus() {
     switch theftProtection.state {
     case .disabled:
-      statusMenuItem.title = "🔴 Status: Disabled"
-      toggleMenuItem.title = "🟢 Enable Protection"
+      statusMenuItem.title = "Status: Disabled"
+      statusMenuItem.image = menuSymbol("circle.fill", color: .systemRed)
+      toggleMenuItem.title = "Enable Protection"
+      toggleMenuItem.image = menuSymbol("checkmark.shield", color: .systemGreen)
       statusItem.button?.image = NSImage(
         systemSymbolName: "laptopcomputer.slash",
         accessibilityDescription: "Disabled"
       )
 
     case .enabled:
-      statusMenuItem.title = "✅ Status: Monitoring"
-      toggleMenuItem.title = "🔴 Disable Protection"
+      statusMenuItem.title = "Status: Monitoring"
+      statusMenuItem.image = menuSymbol("checkmark.circle.fill", color: .systemGreen)
+      toggleMenuItem.title = "Disable Protection"
+      toggleMenuItem.image = menuSymbol("xmark.shield", color: .systemRed)
       statusItem.button?.image = NSImage(
         systemSymbolName: "lock.laptopcomputer",
         accessibilityDescription: "Monitoring"
       )
 
     case .theftMode:
-      statusMenuItem.title = "🚨 THEFT MODE ACTIVE"
-      toggleMenuItem.title = "🔓 Deactivate Theft Mode"
+      statusMenuItem.title = "THEFT MODE ACTIVE"
+      statusMenuItem.image = menuSymbol("exclamationmark.triangle.fill", color: .systemRed)
+      toggleMenuItem.title = "Deactivate Theft Mode"
+      toggleMenuItem.image = menuSymbol("lock.open", color: .systemOrange)
       statusItem.button?.image = NSImage(
         systemSymbolName: "exclamationmark.triangle.fill",
         accessibilityDescription: "Theft Mode"
@@ -248,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
-    ActivityLog.shared.logAsync(.system, "LidGuard shutting down")
+    ActivityLog.logAsync(.system, "LidGuard shutting down")
     theftProtection.shutdown()
   }
 }

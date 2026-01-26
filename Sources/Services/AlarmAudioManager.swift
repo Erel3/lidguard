@@ -32,7 +32,7 @@ final class AlarmAudioManager {
       player?.numberOfLoops = -1  // Loop forever
       player?.play()
       Logger.system.info("Alarm started: \(soundName)")
-      ActivityLog.shared.logAsync(.system, "Alarm started: \(soundName)")
+      ActivityLog.logAsync(.system, "Alarm started: \(soundName)")
     } catch {
       Logger.system.error("Failed to play alarm: \(error.localizedDescription)")
       isPlaying = false
@@ -48,7 +48,7 @@ final class AlarmAudioManager {
     setSystemVolume(originalVolume)
 
     Logger.system.info("Alarm stopped")
-    ActivityLog.shared.logAsync(.system, "Alarm stopped")
+    ActivityLog.logAsync(.system, "Alarm stopped")
   }
 
   private func setSystemVolume(_ volume: Float) {

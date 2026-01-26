@@ -20,16 +20,18 @@ final class SettingsWindowController {
 
     let newWindow = NSWindow(contentViewController: hostingController)
     newWindow.title = "Settings"
-    newWindow.styleMask = [.titled, .closable]
+    newWindow.titlebarAppearsTransparent = true
+    newWindow.toolbarStyle = .unified
+    newWindow.styleMask = [.titled, .closable, .fullSizeContentView]
     newWindow.isReleasedWhenClosed = false
     newWindow.delegate = WindowDelegate.shared
 
     // Set size and center on screen
-    newWindow.setContentSize(NSSize(width: 450, height: 550))
+    newWindow.setContentSize(NSSize(width: 620, height: 500))
     if let screen = NSScreen.main {
       let screenFrame = screen.visibleFrame
-      let x = screenFrame.midX - 225
-      let y = screenFrame.midY - 275
+      let x = screenFrame.midX - 310
+      let y = screenFrame.midY - 250
       newWindow.setFrameOrigin(NSPoint(x: x, y: y))
     }
 

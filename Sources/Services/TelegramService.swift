@@ -71,8 +71,12 @@ final class TelegramService: NotificationService {
     case .none:
       return nil
     case .theftMode:
+      var buttons: [[String: String]] = [["text": "✅ Safe"]]
+      if SettingsService.shared.behaviorAlarm {
+        buttons.append(["text": "🔊 Alarm"])
+      }
       return [
-        "keyboard": [[["text": "✅ Safe"], ["text": "🔊 Alarm"]]],
+        "keyboard": [buttons],
         "resize_keyboard": true
       ]
     case .theftModeAlarmOn:

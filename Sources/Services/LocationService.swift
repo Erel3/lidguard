@@ -77,14 +77,14 @@ extension LocationService: CLLocationManagerDelegate {
   func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
     if let location = locations.last {
       cachedLocation = location
-      ActivityLog.shared.logAsync(.location, "Location updated: \(String(format: "%.4f", location.coordinate.latitude)), \(String(format: "%.4f", location.coordinate.longitude))")
+      ActivityLog.logAsync(.location, "Location updated: \(String(format: "%.4f", location.coordinate.latitude)), \(String(format: "%.4f", location.coordinate.longitude))")
     }
     complete(with: locations.last)
   }
 
   func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
     Logger.location.error("Error: \(error.localizedDescription)")
-    ActivityLog.shared.logAsync(.location, "Location error: \(error.localizedDescription)")
+    ActivityLog.logAsync(.location, "Location error: \(error.localizedDescription)")
     complete(with: nil)
   }
 

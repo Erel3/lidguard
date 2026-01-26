@@ -14,7 +14,7 @@ enum NetworkRetry {
     session.dataTask(with: request) { _, response, error in
       if let error = error {
         logger.error("Send failed: \(error.localizedDescription)")
-        ActivityLog.shared.logAsync(logCategory, "Send failed: \(error.localizedDescription)")
+        ActivityLog.logAsync(logCategory, "Send failed: \(error.localizedDescription)")
         if retries > 0 {
           logger.info("Retrying... (\(retries) attempts left)")
           DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
@@ -25,7 +25,7 @@ enum NetworkRetry {
         }
       } else if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
         logger.error("HTTP error: \(httpResponse.statusCode)")
-        ActivityLog.shared.logAsync(logCategory, "HTTP error: \(httpResponse.statusCode)")
+        ActivityLog.logAsync(logCategory, "HTTP error: \(httpResponse.statusCode)")
         if retries > 0 {
           logger.info("Retrying... (\(retries) attempts left)")
           DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
@@ -36,7 +36,7 @@ enum NetworkRetry {
         }
       } else {
         logger.debug("Sent")
-        ActivityLog.shared.logAsync(logCategory, "Sent")
+        ActivityLog.logAsync(logCategory, "Sent")
       }
       completion?()
     }.resume()

@@ -12,6 +12,17 @@ final class SettingsService {
     static let telegramEnabled = "lidguard.telegramEnabled"
     static let pushoverEnabled = "lidguard.pushoverEnabled"
     static let alarmSound = "lidguard.alarmSound"
+
+    // Triggers
+    static let triggerLidClose = "lidguard.triggerLidClose"
+    static let triggerPowerDisconnect = "lidguard.triggerPowerDisconnect"
+    static let triggerPowerButton = "lidguard.triggerPowerButton"
+
+    // Behaviors
+    static let behaviorSleepPrevention = "lidguard.behaviorSleepPrevention"
+    static let behaviorShutdownBlocking = "lidguard.behaviorShutdownBlocking"
+    static let behaviorLockScreen = "lidguard.behaviorLockScreen"
+    static let behaviorAlarm = "lidguard.behaviorAlarm"
   }
 
   private enum KeychainKeys {
@@ -115,6 +126,45 @@ final class SettingsService {
     set { defaults.set(newValue, forKey: Keys.alarmSound) }
   }
 
+  // MARK: - Triggers
+
+  var triggerLidClose: Bool {
+    get { defaults.object(forKey: Keys.triggerLidClose) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.triggerLidClose) }
+  }
+
+  var triggerPowerDisconnect: Bool {
+    get { defaults.object(forKey: Keys.triggerPowerDisconnect) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.triggerPowerDisconnect) }
+  }
+
+  var triggerPowerButton: Bool {
+    get { defaults.object(forKey: Keys.triggerPowerButton) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.triggerPowerButton) }
+  }
+
+  // MARK: - Behaviors
+
+  var behaviorSleepPrevention: Bool {
+    get { defaults.object(forKey: Keys.behaviorSleepPrevention) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.behaviorSleepPrevention) }
+  }
+
+  var behaviorShutdownBlocking: Bool {
+    get { defaults.object(forKey: Keys.behaviorShutdownBlocking) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.behaviorShutdownBlocking) }
+  }
+
+  var behaviorLockScreen: Bool {
+    get { defaults.object(forKey: Keys.behaviorLockScreen) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.behaviorLockScreen) }
+  }
+
+  var behaviorAlarm: Bool {
+    get { defaults.object(forKey: Keys.behaviorAlarm) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.behaviorAlarm) }
+  }
+
   // MARK: - Configuration Status
 
   func isConfigured() -> Bool {
@@ -130,6 +180,13 @@ final class SettingsService {
     defaults.removeObject(forKey: Keys.telegramEnabled)
     defaults.removeObject(forKey: Keys.pushoverEnabled)
     defaults.removeObject(forKey: Keys.alarmSound)
+    defaults.removeObject(forKey: Keys.triggerLidClose)
+    defaults.removeObject(forKey: Keys.triggerPowerDisconnect)
+    defaults.removeObject(forKey: Keys.triggerPowerButton)
+    defaults.removeObject(forKey: Keys.behaviorSleepPrevention)
+    defaults.removeObject(forKey: Keys.behaviorShutdownBlocking)
+    defaults.removeObject(forKey: Keys.behaviorLockScreen)
+    defaults.removeObject(forKey: Keys.behaviorAlarm)
 
     // Clear Keychain
     KeychainService.deleteAll()

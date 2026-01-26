@@ -52,7 +52,7 @@ final class PowerMonitorService {
     }
   }
 
-  private func isCharging() -> Bool {
+  func isCharging() -> Bool {
     guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
           let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [Any],
           let source = sources.first,

@@ -97,8 +97,25 @@ final class TheftProtectionService {
     ActivityLog.logAsync(.armed, "Protection enabled")
 
     if notify {
+      var triggers: [String] = []
+      if settings.triggerLidClose { triggers.append("lid close") }
+      if settings.triggerPowerDisconnect { triggers.append("power disconnect") }
+      if settings.triggerPowerButton { triggers.append("power button") }
+
+      var behaviors: [String] = []
+      if settings.behaviorSleepPrevention { behaviors.append("sleep prevention") }
+      if settings.behaviorShutdownBlocking { behaviors.append("shutdown blocking") }
+      if settings.behaviorLockScreen { behaviors.append("lock screen") }
+      if settings.behaviorAlarm {
+        behaviors.append(settings.behaviorAutoAlarm ? "alarm (auto)" : "alarm")
+      }
+
+      var message = "🟢 <b>PROTECTION ENABLED</b>\n\n"
+      message += "⚡️ <b>Triggers:</b> \(triggers.isEmpty ? "none" : triggers.joined(separator: ", "))\n"
+      message += "🛡 <b>Behaviors:</b> \(behaviors.isEmpty ? "none" : behaviors.joined(separator: ", "))"
+
       notificationService.send(
-        message: "🟢 <b>PROTECTION ENABLED</b>\n\nMonitoring for lid close.",
+        message: message,
         keyboard: .enabled,
         completion: nil
       )
@@ -205,8 +222,31 @@ final class TheftProtectionService {
         keyboard = .theftMode
       }
 
+      let settings = SettingsService.shared
+      let lidState = self.lidMonitor.isClosed ? "closed" : "open"
+      let chargerState = self.powerMonitor.isCharging() ? "connected" : "disconnected"
+
+      var triggers: [String] = []
+      if settings.triggerLidClose { triggers.append("lid close") }
+      if settings.triggerPowerDisconnect { triggers.append("power disconnect") }
+      if settings.triggerPowerButton { triggers.append("power button") }
+
+      var behaviors: [String] = []
+      if settings.behaviorSleepPrevention { behaviors.append("sleep prevention") }
+      if settings.behaviorShutdownBlocking { behaviors.append("shutdown blocking") }
+      if settings.behaviorLockScreen { behaviors.append("lock screen") }
+      if settings.behaviorAlarm {
+        behaviors.append(settings.behaviorAutoAlarm ? "alarm (auto)" : "alarm")
+      }
+
+      var hardwareInfo = ""
+      hardwareInfo += "🖥 <b>Lid:</b> \(lidState)\n"
+      hardwareInfo += "🔌 <b>Charger:</b> \(chargerState)\n"
+      hardwareInfo += "⚡️ <b>Triggers:</b> \(triggers.isEmpty ? "none" : triggers.joined(separator: ", "))\n"
+      hardwareInfo += "🛡 <b>Behaviors:</b> \(behaviors.isEmpty ? "none" : behaviors.joined(separator: ", "))\n\n"
+
       self.notificationService.send(
-        message: "<b>STATUS: \(status)</b>\n\n\(info.formattedMessage)",
+        message: "<b>STATUS: \(status)</b>\n\n\(hardwareInfo)\(info.formattedMessage)",
         keyboard: keyboard,
         completion: nil
       )

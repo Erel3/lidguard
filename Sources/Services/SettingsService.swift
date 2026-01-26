@@ -23,6 +23,8 @@ final class SettingsService {
     static let behaviorShutdownBlocking = "lidguard.behaviorShutdownBlocking"
     static let behaviorLockScreen = "lidguard.behaviorLockScreen"
     static let behaviorAlarm = "lidguard.behaviorAlarm"
+    static let behaviorAutoAlarm = "lidguard.behaviorAutoAlarm"
+    static let alarmVolume = "lidguard.alarmVolume"
   }
 
   private enum KeychainKeys {
@@ -122,7 +124,7 @@ final class SettingsService {
   // MARK: - Alarm Sound
 
   var alarmSound: String {
-    get { defaults.string(forKey: Keys.alarmSound) ?? "Sosumi" }
+    get { defaults.string(forKey: Keys.alarmSound) ?? "Siren" }
     set { defaults.set(newValue, forKey: Keys.alarmSound) }
   }
 
@@ -165,6 +167,16 @@ final class SettingsService {
     set { defaults.set(newValue, forKey: Keys.behaviorAlarm) }
   }
 
+  var behaviorAutoAlarm: Bool {
+    get { defaults.object(forKey: Keys.behaviorAutoAlarm) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.behaviorAutoAlarm) }
+  }
+
+  var alarmVolume: Int {
+    get { defaults.object(forKey: Keys.alarmVolume) as? Int ?? 100 }
+    set { defaults.set(newValue, forKey: Keys.alarmVolume) }
+  }
+
   // MARK: - Configuration Status
 
   func isConfigured() -> Bool {
@@ -187,6 +199,8 @@ final class SettingsService {
     defaults.removeObject(forKey: Keys.behaviorShutdownBlocking)
     defaults.removeObject(forKey: Keys.behaviorLockScreen)
     defaults.removeObject(forKey: Keys.behaviorAlarm)
+    defaults.removeObject(forKey: Keys.behaviorAutoAlarm)
+    defaults.removeObject(forKey: Keys.alarmVolume)
 
     // Clear Keychain
     KeychainService.deleteAll()

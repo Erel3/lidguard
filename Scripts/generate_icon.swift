@@ -3,6 +3,10 @@
 import AppKit
 import Foundation
 
+// MARK: - Color Space
+
+let sRGB = CGColorSpaceCreateDeviceRGB()
+
 // MARK: - Icon Drawing
 
 func drawIcon(size: CGFloat) -> NSImage {
@@ -15,200 +19,179 @@ func drawIcon(size: CGFloat) -> NSImage {
   }
 
   let rect = CGRect(x: 0, y: 0, width: size, height: size)
+
   drawBackground(ctx: ctx, rect: rect)
-  drawLaptop(ctx: ctx, rect: rect)
-  drawGuardEye(ctx: ctx, rect: rect)
+  drawSymbol(ctx: ctx, rect: rect)
 
   image.unlockFocus()
   return image
 }
 
+// MARK: - 1. Background
+
 func drawBackground(ctx: CGContext, rect: CGRect) {
   let s = rect.width
-  // macOS-style continuous rounded rect (superellipse approximation)
   let cornerRadius = s * 0.2237
   let path = CGPath(roundedRect: rect.insetBy(dx: s * 0.01, dy: s * 0.01),
                      cornerWidth: cornerRadius, cornerHeight: cornerRadius,
                      transform: nil)
 
-  // Dark gradient background
   ctx.saveGState()
   ctx.addPath(path)
   ctx.clip()
 
-  let colors = [
-    CGColor(red: 0.10, green: 0.10, blue: 0.18, alpha: 1.0),  // #1a1a2e
-    CGColor(red: 0.086, green: 0.13, blue: 0.24, alpha: 1.0)   // #16213e
+  // Dark burgundy — solid with subtle top-light gradient
+  let bgColors = [
+    CGColor(red: 0.18, green: 0.06, blue: 0.07, alpha: 1.0),  // #2e1012 top (slightly lighter)
+    CGColor(red: 0.10, green: 0.03, blue: 0.04, alpha: 1.0)   // #1a080a bottom (darker)
   ]
-  let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                             colors: colors as CFArray,
-                             locations: [0.0, 1.0])!
-  ctx.drawLinearGradient(gradient,
+  let bgGrad = CGGradient(colorsSpace: sRGB, colors: bgColors as CFArray,
+                           locations: [0.0, 1.0])!
+  ctx.drawLinearGradient(bgGrad,
                           start: CGPoint(x: s * 0.5, y: s),
                           end: CGPoint(x: s * 0.5, y: 0),
                           options: [])
+
   ctx.restoreGState()
 }
 
-func drawLaptop(ctx: CGContext, rect: CGRect) {
-  let s = rect.width
+// MARK: - 2. Symbol (one-color laptop + eye)
 
-  // Laptop base (bottom portion)
-  let baseW = s * 0.56
-  let baseH = s * 0.06
-  let baseX = (s - baseW) / 2
-  let baseY = s * 0.305
-
-  ctx.saveGState()
-  let basePath = CGPath(roundedRect: CGRect(x: baseX, y: baseY, width: baseW, height: baseH),
-                         cornerWidth: baseH * 0.4, cornerHeight: baseH * 0.4,
-                         transform: nil)
-  ctx.setFillColor(CGColor(red: 0.70, green: 0.70, blue: 0.72, alpha: 1.0))
-  ctx.addPath(basePath)
-  ctx.fillPath()
-  ctx.restoreGState()
-
-  // Laptop screen (lid)
-  let screenW = s * 0.46
-  let screenH = s * 0.32
-  let screenX = (s - screenW) / 2
-  let screenY = baseY + baseH + s * 0.01
-  let screenCorner = s * 0.02
-
-  ctx.saveGState()
-  let screenPath = CGPath(roundedRect: CGRect(x: screenX, y: screenY, width: screenW, height: screenH),
+func drawLaptopShape(ctx: CGContext, cx: CGFloat, s: CGFloat, lineW: CGFloat, fill: Bool) {
+  // --- Screen lid (landscape rect, stroked) ---
+  let screenW = s * 0.58
+  let screenH = s * 0.34
+  let screenX = cx - screenW / 2
+  let screenY = s * 0.40
+  let screenCorner = s * 0.025
+  let screenPath = CGPath(roundedRect: CGRect(x: screenX, y: screenY,
+                                               width: screenW, height: screenH),
                            cornerWidth: screenCorner, cornerHeight: screenCorner,
                            transform: nil)
-  ctx.setFillColor(CGColor(red: 0.55, green: 0.55, blue: 0.58, alpha: 1.0))
   ctx.addPath(screenPath)
+  if fill { ctx.fillPath() } else { ctx.strokePath() }
+
+  // --- Hinge strip (thin filled rect connecting screen to base) ---
+  let hingeW = screenW * 0.6
+  let hingeH = s * 0.018
+  let hingeY = screenY - hingeH
+  let hingePath = CGRect(x: cx - hingeW / 2, y: hingeY, width: hingeW, height: hingeH)
+  ctx.fill([hingePath])
+
+  // --- Base / keyboard deck (trapezoid — wider at front, narrower at hinge) ---
+  let baseTopW = screenW + s * 0.04  // slightly wider than screen at hinge
+  let baseBotW = screenW + s * 0.14  // much wider at front edge
+  let baseH = s * 0.07
+  let baseTopY = hingeY - s * 0.005
+  let baseBotY = baseTopY - baseH
+
+  let basePath = CGMutablePath()
+  let baseTopL = cx - baseTopW / 2
+  let baseTopR = cx + baseTopW / 2
+  let baseBotL = cx - baseBotW / 2
+  let baseBotR = cx + baseBotW / 2
+  let baseCorner = s * 0.012
+
+  // Draw with small rounded front corners
+  basePath.move(to: CGPoint(x: baseTopL, y: baseTopY))
+  basePath.addLine(to: CGPoint(x: baseTopR, y: baseTopY))
+  basePath.addLine(to: CGPoint(x: baseBotR - baseCorner, y: baseBotY + baseCorner))
+  basePath.addQuadCurve(to: CGPoint(x: baseBotR, y: baseBotY),
+                        control: CGPoint(x: baseBotR, y: baseBotY + baseCorner))
+  // front edge (not needed — just go straight)
+  basePath.addLine(to: CGPoint(x: baseBotL, y: baseBotY))
+  basePath.addQuadCurve(to: CGPoint(x: baseBotL + baseCorner, y: baseBotY + baseCorner),
+                        control: CGPoint(x: baseBotL, y: baseBotY + baseCorner))
+  basePath.closeSubpath()
+
+  ctx.addPath(basePath)
   ctx.fillPath()
 
-  // Inner screen (dark)
-  let innerMargin = s * 0.02
-  let innerPath = CGPath(roundedRect: CGRect(x: screenX + innerMargin,
-                                              y: screenY + innerMargin,
-                                              width: screenW - innerMargin * 2,
-                                              height: screenH - innerMargin * 2),
-                          cornerWidth: screenCorner * 0.5, cornerHeight: screenCorner * 0.5,
-                          transform: nil)
-  ctx.setFillColor(CGColor(red: 0.12, green: 0.12, blue: 0.16, alpha: 1.0))
-  ctx.addPath(innerPath)
-  ctx.fillPath()
-  ctx.restoreGState()
+  // --- Front edge line (lip of the laptop) ---
+  ctx.setLineWidth(lineW * 0.6)
+  ctx.move(to: CGPoint(x: baseBotL + s * 0.04, y: baseBotY + baseH * 0.35))
+  ctx.addLine(to: CGPoint(x: baseBotR - s * 0.04, y: baseBotY + baseH * 0.35))
+  ctx.strokePath()
 }
 
-func drawGuardEye(ctx: CGContext, rect: CGRect) {
-  let s = rect.width
-  let centerX = s * 0.5
-
-  // Position eye at center of the inner screen
-  let centerY = s * 0.535
-
-  // Clip glow to inner screen area so it doesn't bleed outside the display
-  let screenW = s * 0.46
-  let screenH = s * 0.32
-  let screenX = (s - screenW) / 2
-  let screenY = s * 0.305 + s * 0.06 + s * 0.01
-  let innerMargin = s * 0.02
-  let innerRect = CGRect(x: screenX + innerMargin,
-                          y: screenY + innerMargin,
-                          width: screenW - innerMargin * 2,
-                          height: screenH - innerMargin * 2)
-  let innerCorner = s * 0.01
-
-  // Subtle radial glow behind the eye (clipped to screen)
-  ctx.saveGState()
-  let innerClip = CGPath(roundedRect: innerRect,
-                          cornerWidth: innerCorner, cornerHeight: innerCorner,
-                          transform: nil)
-  ctx.addPath(innerClip)
-  ctx.clip()
-  let glowColors = [
-    CGColor(red: 1.0, green: 0.27, blue: 0.0, alpha: 0.30),
-    CGColor(red: 1.0, green: 0.27, blue: 0.0, alpha: 0.0)
-  ]
-  let glowGradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                 colors: glowColors as CFArray,
-                                 locations: [0.0, 1.0])!
-  ctx.drawRadialGradient(glowGradient,
-                          startCenter: CGPoint(x: centerX, y: centerY),
-                          startRadius: 0,
-                          endCenter: CGPoint(x: centerX, y: centerY),
-                          endRadius: s * 0.20,
-                          options: [])
-  ctx.restoreGState()
-
-  // Eye shape — sized to fit within screen
+func drawEyeShape(ctx: CGContext, cx: CGFloat, cy: CGFloat, s: CGFloat,
+                  lineW: CGFloat, open: Bool) {
   let eyeW = s * 0.34
-  let eyeH = s * 0.12
-  let eyePath = CGMutablePath()
+  let eyeH = s * 0.14
+  let leftX = cx - eyeW / 2
+  let rightX = cx + eyeW / 2
 
-  let leftX = centerX - eyeW / 2
-  let rightX = centerX + eyeW / 2
+  if open {
+    // Full almond eye
+    let path = CGMutablePath()
+    path.move(to: CGPoint(x: leftX, y: cy))
+    path.addCurve(to: CGPoint(x: rightX, y: cy),
+                  control1: CGPoint(x: leftX + eyeW * 0.25, y: cy + eyeH),
+                  control2: CGPoint(x: rightX - eyeW * 0.25, y: cy + eyeH))
+    path.addCurve(to: CGPoint(x: leftX, y: cy),
+                  control1: CGPoint(x: rightX - eyeW * 0.25, y: cy - eyeH),
+                  control2: CGPoint(x: leftX + eyeW * 0.25, y: cy - eyeH))
+    path.closeSubpath()
 
-  // Top arc
-  eyePath.move(to: CGPoint(x: leftX, y: centerY))
-  eyePath.addCurve(to: CGPoint(x: rightX, y: centerY),
-                   control1: CGPoint(x: leftX + eyeW * 0.25, y: centerY + eyeH),
-                   control2: CGPoint(x: rightX - eyeW * 0.25, y: centerY + eyeH))
-  // Bottom arc
-  eyePath.addCurve(to: CGPoint(x: leftX, y: centerY),
-                   control1: CGPoint(x: rightX - eyeW * 0.25, y: centerY - eyeH),
-                   control2: CGPoint(x: leftX + eyeW * 0.25, y: centerY - eyeH))
-  eyePath.closeSubpath()
+    ctx.setLineWidth(lineW)
+    ctx.addPath(path)
+    ctx.strokePath()
 
-  // Fill eye with red-to-orange gradient
+    // Iris
+    let irisR = s * 0.058
+    ctx.fillEllipse(in: CGRect(x: cx - irisR, y: cy - irisR,
+                                width: irisR * 2, height: irisR * 2))
+  } else {
+    // Closed — downward curve + lashes
+    let path = CGMutablePath()
+    path.move(to: CGPoint(x: leftX, y: cy))
+    path.addCurve(to: CGPoint(x: rightX, y: cy),
+                  control1: CGPoint(x: leftX + eyeW * 0.25, y: cy - eyeH),
+                  control2: CGPoint(x: rightX - eyeW * 0.25, y: cy - eyeH))
+
+    ctx.setLineWidth(lineW)
+    ctx.setLineCap(.round)
+    ctx.addPath(path)
+    ctx.strokePath()
+
+    // Lashes
+    let lashLen = s * 0.03
+    for t: CGFloat in [0.2, 0.4, 0.6, 0.8] {
+      let x = leftX + eyeW * t
+      let yOff = eyeH * (1.0 - 4.0 * (t - 0.5) * (t - 0.5))
+      let y = cy - yOff
+      ctx.move(to: CGPoint(x: x, y: y))
+      ctx.addLine(to: CGPoint(x: x, y: y - lashLen))
+    }
+    ctx.strokePath()
+  }
+}
+
+func drawSymbol(ctx: CGContext, rect: CGRect) {
+  let s = rect.width
+  let cx = s * 0.5
+  let color = CGColor(red: 0.91, green: 0.52, blue: 0.29, alpha: 1.0)  // #E8854A
+  let lineW = s * 0.018
+
   ctx.saveGState()
-  ctx.addPath(eyePath)
-  ctx.clip()
+  ctx.setStrokeColor(color)
+  ctx.setFillColor(color)
+  ctx.setLineWidth(lineW)
+  ctx.setLineCap(.round)
+  ctx.setLineJoin(.round)
 
-  let eyeColors = [
-    CGColor(red: 1.0, green: 0.27, blue: 0.27, alpha: 1.0),   // #ff4444
-    CGColor(red: 1.0, green: 0.53, blue: 0.0, alpha: 1.0)      // #ff8800
-  ]
-  let eyeGradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                colors: eyeColors as CFArray,
-                                locations: [0.0, 1.0])!
-  ctx.drawLinearGradient(eyeGradient,
-                          start: CGPoint(x: leftX, y: centerY),
-                          end: CGPoint(x: rightX, y: centerY),
-                          options: [])
-  ctx.restoreGState()
+  drawLaptopShape(ctx: ctx, cx: cx, s: s, lineW: lineW, fill: false)
 
-  // Eye outline
-  ctx.saveGState()
-  ctx.addPath(eyePath)
-  ctx.setStrokeColor(CGColor(red: 1.0, green: 0.35, blue: 0.15, alpha: 0.6))
-  ctx.setLineWidth(s * 0.008)
-  ctx.strokePath()
-  ctx.restoreGState()
+  // Eye centered in screen area
+  let eyeCY = s * 0.40 + s * 0.34 * 0.5  // screenY + screenH/2
+  drawEyeShape(ctx: ctx, cx: cx, cy: eyeCY, s: s, lineW: lineW, open: true)
 
-  // Iris (circle)
-  let irisR = s * 0.05
-  let irisRect = CGRect(x: centerX - irisR, y: centerY - irisR,
-                         width: irisR * 2, height: irisR * 2)
-  ctx.saveGState()
-  ctx.setFillColor(CGColor(red: 0.15, green: 0.05, blue: 0.05, alpha: 1.0))
-  ctx.fillEllipse(in: irisRect)
-  ctx.restoreGState()
+  // Pupil cutout
+  let pupilR = s * 0.026
+  ctx.setFillColor(CGColor(red: 0.14, green: 0.045, blue: 0.055, alpha: 1.0))
+  ctx.fillEllipse(in: CGRect(x: cx - pupilR, y: eyeCY - pupilR,
+                              width: pupilR * 2, height: pupilR * 2))
 
-  // Pupil (smaller circle)
-  let pupilR = s * 0.025
-  let pupilRect = CGRect(x: centerX - pupilR, y: centerY - pupilR,
-                          width: pupilR * 2, height: pupilR * 2)
-  ctx.saveGState()
-  ctx.setFillColor(CGColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0))
-  ctx.fillEllipse(in: pupilRect)
-  ctx.restoreGState()
-
-  // Highlight (small bright spot)
-  let hlR = s * 0.01
-  let hlRect = CGRect(x: centerX + pupilR * 0.4 - hlR,
-                       y: centerY + pupilR * 0.4 - hlR,
-                       width: hlR * 2, height: hlR * 2)
-  ctx.saveGState()
-  ctx.setFillColor(CGColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.8))
-  ctx.fillEllipse(in: hlRect)
   ctx.restoreGState()
 }
 

@@ -42,6 +42,8 @@ struct SettingsView: View {
   @State private var behaviorShutdownBlocking: Bool = true
   @State private var behaviorLockScreen: Bool = true
   @State private var behaviorAlarm: Bool = true
+  @State private var behaviorAutoAlarm: Bool = false
+  @State private var alarmVolume: Double = 100
   @State private var selectedAlarmSound: String = "Sosumi"
 
   // Notifications
@@ -57,6 +59,7 @@ struct SettingsView: View {
   @Environment(\.dismiss) private var dismiss
 
   private let alarmSounds = [
+    "Siren",
     "Basso", "Blow", "Bottle", "Frog", "Funk", "Glass",
     "Hero", "Morse", "Ping", "Pop", "Purr", "Sosumi",
     "Submarine", "Tink"
@@ -245,13 +248,26 @@ struct SettingsView: View {
       Section {
         Toggle("Alarm enabled", isOn: $behaviorAlarm)
         if behaviorAlarm {
+          Toggle("Auto-play on theft mode", isOn: $behaviorAutoAlarm)
           Picker("Alarm Sound", selection: $selectedAlarmSound) {
             ForEach(alarmSounds, id: \.self) { sound in
               Text(sound).tag(sound)
             }
           }
           .onChange(of: selectedAlarmSound) { _, newValue in
-            NSSound(named: newValue)?.play()
+            if newValue == "Siren" {
+              AlarmAudioManager.shared.previewSiren()
+            } else {
+              NSSound(named: newValue)?.play()
+            }
+          }
+          LabeledContent("Volume") {
+            HStack {
+              Slider(value: $alarmVolume, in: 10...100, step: 10)
+              Text("\(Int(alarmVolume))%")
+                .monospacedDigit()
+                .frame(width: 40, alignment: .trailing)
+            }
           }
         }
       } header: {
@@ -310,6 +326,8 @@ struct SettingsView: View {
     startAtLogin = loginItem.isEnabled
     sleepPreventionInstalled = pmset.isInstalled()
     selectedAlarmSound = settings.alarmSound
+    behaviorAutoAlarm = settings.behaviorAutoAlarm
+    alarmVolume = Double(settings.alarmVolume)
     triggerLidClose = settings.triggerLidClose
     triggerPowerDisconnect = settings.triggerPowerDisconnect
     triggerPowerButton = settings.triggerPowerButton
@@ -329,6 +347,8 @@ struct SettingsView: View {
     settings.pushoverApiToken = pushoverApiToken.isEmpty ? nil : pushoverApiToken
     settings.pushoverEnabled = pushoverEnabled
     settings.alarmSound = selectedAlarmSound
+    settings.behaviorAutoAlarm = behaviorAutoAlarm
+    settings.alarmVolume = Int(alarmVolume)
     settings.triggerLidClose = triggerLidClose
     settings.triggerPowerDisconnect = triggerPowerDisconnect
     settings.triggerPowerButton = triggerPowerButton

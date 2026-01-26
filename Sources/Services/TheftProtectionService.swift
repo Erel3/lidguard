@@ -153,6 +153,11 @@ final class TheftProtectionService {
     // Immediate Pushover alert (fast)
     pushover.send(message: "🚨 THEFT MODE ACTIVATED - \(trigger.description)")
 
+    // Auto-play alarm if enabled
+    if SettingsService.shared.behaviorAlarm && SettingsService.shared.behaviorAutoAlarm {
+      AlarmAudioManager.shared.play()
+    }
+
     sendUpdate(type: .initial)
     startTracking()
 

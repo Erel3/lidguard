@@ -184,6 +184,135 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     return image.withSymbolConfiguration(config)
   }
 
+  // MARK: - Custom Menu Bar Icons
+
+  private func menuBarIcon(_ style: MenuBarIconStyle) -> NSImage {
+    let size: CGFloat = 18
+    let image = NSImage(size: NSSize(width: size, height: size))
+    image.lockFocus()
+    if let ctx = NSGraphicsContext.current?.cgContext {
+      drawMenuBarIcon(ctx: ctx, size: size, style: style)
+    }
+    image.unlockFocus()
+    // Alert uses hardcoded red — not a template
+    image.isTemplate = (style != .eyeAlert)
+    return image
+  }
+
+  private enum MenuBarIconStyle {
+    case eyeOpen       // enabled / monitoring
+    case eyeClosed     // disabled
+    case eyeAlert      // theft mode — eye + exclamation
+  }
+
+  private func drawMenuBarIcon(ctx: CGContext, size: CGFloat, style: MenuBarIconStyle) {
+    let s = size
+    let cx = s * 0.5
+    let lw = s * 0.065
+
+    if style == .eyeAlert {
+      let red = CGColor(red: 0.9, green: 0.2, blue: 0.15, alpha: 1.0)
+      ctx.setStrokeColor(red)
+      ctx.setFillColor(red)
+    } else {
+      ctx.setStrokeColor(.black)
+      ctx.setFillColor(.black)
+    }
+    ctx.setLineWidth(lw)
+    ctx.setLineCap(.round)
+    ctx.setLineJoin(.round)
+
+    // --- Screen lid (landscape rect) ---
+    let screenW = s * 0.72
+    let screenH = s * 0.42
+    let screenY = s * 0.38
+    let screenCorner = s * 0.04
+    let screenPath = CGPath(roundedRect: CGRect(x: cx - screenW / 2, y: screenY,
+                                                 width: screenW, height: screenH),
+                             cornerWidth: screenCorner, cornerHeight: screenCorner,
+                             transform: nil)
+    ctx.addPath(screenPath)
+    ctx.strokePath()
+
+    // --- Hinge ---
+    let hingeW = screenW * 0.5
+    let hingeH = s * 0.035
+    ctx.fill([CGRect(x: cx - hingeW / 2, y: screenY - hingeH, width: hingeW, height: hingeH)])
+
+    // --- Base (trapezoid) ---
+    let baseTopW = screenW + s * 0.06
+    let baseBotW = screenW + s * 0.18
+    let baseH = s * 0.09
+    let baseTopY = screenY - hingeH - s * 0.01
+    let baseBotY = baseTopY - baseH
+    let cr = s * 0.02
+
+    let base = CGMutablePath()
+    base.move(to: CGPoint(x: cx - baseTopW / 2, y: baseTopY))
+    base.addLine(to: CGPoint(x: cx + baseTopW / 2, y: baseTopY))
+    base.addLine(to: CGPoint(x: cx + baseBotW / 2 - cr, y: baseBotY + cr))
+    base.addQuadCurve(to: CGPoint(x: cx + baseBotW / 2, y: baseBotY),
+                      control: CGPoint(x: cx + baseBotW / 2, y: baseBotY + cr))
+    base.addLine(to: CGPoint(x: cx - baseBotW / 2, y: baseBotY))
+    base.addQuadCurve(to: CGPoint(x: cx - baseBotW / 2 + cr, y: baseBotY + cr),
+                      control: CGPoint(x: cx - baseBotW / 2, y: baseBotY + cr))
+    base.closeSubpath()
+    ctx.addPath(base)
+    ctx.fillPath()
+
+    // --- Eye inside screen ---
+    let eyeCY = screenY + screenH * 0.5
+    let eyeW = s * 0.36
+    let eyeH = s * 0.14
+    let leftX = cx - eyeW / 2
+    let rightX = cx + eyeW / 2
+
+    switch style {
+    case .eyeOpen, .eyeAlert:
+      let path = CGMutablePath()
+      path.move(to: CGPoint(x: leftX, y: eyeCY))
+      path.addCurve(to: CGPoint(x: rightX, y: eyeCY),
+                    control1: CGPoint(x: leftX + eyeW * 0.25, y: eyeCY + eyeH),
+                    control2: CGPoint(x: rightX - eyeW * 0.25, y: eyeCY + eyeH))
+      path.addCurve(to: CGPoint(x: leftX, y: eyeCY),
+                    control1: CGPoint(x: rightX - eyeW * 0.25, y: eyeCY - eyeH),
+                    control2: CGPoint(x: leftX + eyeW * 0.25, y: eyeCY - eyeH))
+      path.closeSubpath()
+
+      ctx.addPath(path)
+      ctx.strokePath()
+
+      let irisR = s * 0.08
+      ctx.fillEllipse(in: CGRect(x: cx - irisR, y: eyeCY - irisR,
+                                  width: irisR * 2, height: irisR * 2))
+
+    case .eyeClosed:
+      // Shift up so the downward curve + lashes don't hit screen bottom
+      let closedCY = eyeCY + s * 0.06
+      let closedLeftX = cx - eyeW / 2
+      let closedRightX = cx + eyeW / 2
+
+      let path = CGMutablePath()
+      path.move(to: CGPoint(x: closedLeftX, y: closedCY))
+      path.addCurve(to: CGPoint(x: closedRightX, y: closedCY),
+                    control1: CGPoint(x: closedLeftX + eyeW * 0.25, y: closedCY - eyeH),
+                    control2: CGPoint(x: closedRightX - eyeW * 0.25, y: closedCY - eyeH))
+
+      ctx.addPath(path)
+      ctx.strokePath()
+
+      let lashLen = s * 0.06
+      for t: CGFloat in [0.25, 0.5, 0.75] {
+        let x = closedLeftX + eyeW * t
+        let yOff = eyeH * (1.0 - 4.0 * (t - 0.5) * (t - 0.5))
+        let y = closedCY - yOff
+        ctx.move(to: CGPoint(x: x, y: y))
+        ctx.addLine(to: CGPoint(x: x, y: y - lashLen))
+      }
+      ctx.strokePath()
+    }
+  }
+
   private func updateStatus() {
     switch theftProtection.state {
     case .disabled:
@@ -191,30 +320,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       statusMenuItem.image = menuSymbol("circle.fill", color: .systemRed)
       toggleMenuItem.title = "Enable Protection"
       toggleMenuItem.image = menuSymbol("checkmark.shield", color: .systemGreen)
-      statusItem.button?.image = NSImage(
-        systemSymbolName: "laptopcomputer.slash",
-        accessibilityDescription: "Disabled"
-      )
+      statusItem.button?.image = menuBarIcon(.eyeClosed)
 
     case .enabled:
       statusMenuItem.title = "Status: Monitoring"
       statusMenuItem.image = menuSymbol("checkmark.circle.fill", color: .systemGreen)
       toggleMenuItem.title = "Disable Protection"
       toggleMenuItem.image = menuSymbol("xmark.shield", color: .systemRed)
-      statusItem.button?.image = NSImage(
-        systemSymbolName: "lock.laptopcomputer",
-        accessibilityDescription: "Monitoring"
-      )
+      statusItem.button?.image = menuBarIcon(.eyeOpen)
 
     case .theftMode:
       statusMenuItem.title = "THEFT MODE ACTIVE"
       statusMenuItem.image = menuSymbol("exclamationmark.triangle.fill", color: .systemRed)
       toggleMenuItem.title = "Deactivate Theft Mode"
       toggleMenuItem.image = menuSymbol("lock.open", color: .systemOrange)
-      statusItem.button?.image = NSImage(
-        systemSymbolName: "exclamationmark.triangle.fill",
-        accessibilityDescription: "Theft Mode"
-      )
+      statusItem.button?.image = menuBarIcon(.eyeAlert)
     }
   }
 

@@ -5,6 +5,7 @@
 # Build artifacts
 dist/
 *.app
+*.zip
 
 # macOS
 .DS_Store

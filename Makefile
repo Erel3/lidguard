@@ -3,55 +3,64 @@ BUNDLE = dist/$(APP_NAME).app
 BUILD_DIR = .build/release
 VERSION_FILE = VERSION
 BUMP ?= patch
+CODESIGN_ID ?= LidGuard
+CODESIGN_REQ ?= designated => certificate leaf = H"9787B7F0A9496DF5757D22D586EA8C0735656867"
 
-.PHONY: build bundle bundle-prod clean install run version icon
+.PHONY: build run run-debug install release clean version icon
 
-# Read current version
 VERSION := $(shell cat $(VERSION_FILE) 2>/dev/null || echo "1.0.0")
-VERSION_BASE := $(shell echo $(VERSION) | sed 's/-dev//')
-IS_DEV := $(findstring -dev,$(VERSION))
 
 build:
 	swift build -c release
 
-# Dev build: bump version, add -dev suffix
-bundle: bump-version build
-	@echo "Building $(APP_NAME) v$$(cat $(VERSION_FILE))-dev"
-	rm -rf $(BUNDLE)
-	mkdir -p $(BUNDLE)/Contents/MacOS
-	mkdir -p $(BUNDLE)/Contents/Resources
-	cp $(BUILD_DIR)/$(APP_NAME) $(BUNDLE)/Contents/MacOS/
-	@VERSION=$$(cat $(VERSION_FILE))-dev; \
+# Dev: bundle with -dev suffix and open
+run: build
+	@$(MAKE) _bundle SUFFIX=-dev
+	open $(BUNDLE)
+
+# Debug: build debug binary and run directly (no .app bundle)
+run-debug:
+	swift build && .build/debug/$(APP_NAME)
+
+# Install current bundle to /Applications
+install:
+	@test -d $(BUNDLE) || (echo "Error: No bundle found. Run 'make run' or 'make release' first." && exit 1)
+	@VERSION=$$(plutil -extract CFBundleShortVersionString raw $(BUNDLE)/Contents/Info.plist); \
+	echo "Installing $(APP_NAME) v$$VERSION to /Applications"
+	rm -rf /Applications/$(APP_NAME).app
+	cp -r $(BUNDLE) /Applications/
+
+# Release: bump version, build prod, commit, tag, push, create GH release
+release: _bump build
+	@$(MAKE) _bundle SUFFIX=
+	@VERSION=$$(cat $(VERSION_FILE)); \
+	git add $(VERSION_FILE) && \
+	git commit -m "chore: bump version to $$VERSION" && \
+	git tag "v$$VERSION" && \
+	cd dist && zip -r $(APP_NAME)-$$VERSION.zip $(APP_NAME).app && cd .. && \
+	git push origin main --tags && \
+	gh release create "v$$VERSION" "dist/$(APP_NAME)-$$VERSION.zip" \
+		--title "v$$VERSION" --generate-notes && \
+	echo "Released v$$VERSION"
+
+# Internal: create .app bundle with optional SUFFIX (-dev or empty)
+_bundle:
+	@VERSION=$$(cat $(VERSION_FILE))$(SUFFIX); \
+	echo "Bundling $(APP_NAME) v$$VERSION"; \
+	rm -rf $(BUNDLE); \
+	mkdir -p $(BUNDLE)/Contents/MacOS $(BUNDLE)/Contents/Resources; \
+	cp $(BUILD_DIR)/$(APP_NAME) $(BUNDLE)/Contents/MacOS/; \
 	sed -e "s/<string>1.0.0</<string>$$VERSION</" \
 	    -e "s/<string>1</<string>$$(echo $$VERSION | tr -d '.-dev')</" \
-	    Info.plist > $(BUNDLE)/Contents/Info.plist
-	cp Resources/AppIcon.icns $(BUNDLE)/Contents/Resources/ 2>/dev/null || true
-	codesign --force --sign "LidGuard" --entitlements LidGuard.entitlements \
+	    Info.plist > $(BUNDLE)/Contents/Info.plist; \
+	cp Resources/AppIcon.icns $(BUNDLE)/Contents/Resources/ 2>/dev/null || true; \
+	codesign --force --sign "$(CODESIGN_ID)" --entitlements LidGuard.entitlements \
 		-o runtime --timestamp=none \
-		-r='designated => certificate leaf = H"9787B7F0A9496DF5757D22D586EA8C0735656867"' \
-		$(BUNDLE)
-	@echo "Built: $(BUNDLE) v$$(cat $(VERSION_FILE))-dev"
+		-r='$(CODESIGN_REQ)' \
+		$(BUNDLE); \
+	echo "Built: $(BUNDLE) v$$VERSION"
 
-# Prod build: same version, no -dev suffix
-bundle-prod: build
-	@echo "Building $(APP_NAME) v$$(cat $(VERSION_FILE)) (prod)"
-	rm -rf $(BUNDLE)
-	mkdir -p $(BUNDLE)/Contents/MacOS
-	mkdir -p $(BUNDLE)/Contents/Resources
-	cp $(BUILD_DIR)/$(APP_NAME) $(BUNDLE)/Contents/MacOS/
-	@VERSION=$$(cat $(VERSION_FILE)); \
-	sed -e "s/<string>1.0.0</<string>$$VERSION</" \
-	    -e "s/<string>1</<string>$$(echo $$VERSION | tr -d '.-')</" \
-	    Info.plist > $(BUNDLE)/Contents/Info.plist
-	cp Resources/AppIcon.icns $(BUNDLE)/Contents/Resources/ 2>/dev/null || true
-	codesign --force --sign "LidGuard" --entitlements LidGuard.entitlements \
-		-o runtime --timestamp=none \
-		-r='designated => certificate leaf = H"9787B7F0A9496DF5757D22D586EA8C0735656867"' \
-		$(BUNDLE)
-	@echo "Built: $(BUNDLE) v$$(cat $(VERSION_FILE)) (prod)"
-
-# Bump version based on BUMP variable (major, minor, patch)
-bump-version:
+_bump:
 	@VERSION=$$(cat $(VERSION_FILE) | sed 's/-dev//'); \
 	MAJOR=$$(echo $$VERSION | cut -d. -f1); \
 	MINOR=$$(echo $$VERSION | cut -d. -f2); \
@@ -62,27 +71,13 @@ bump-version:
 		patch) PATCH=$$((PATCH + 1));; \
 	esac; \
 	echo "$$MAJOR.$$MINOR.$$PATCH" > $(VERSION_FILE); \
-	echo "Version: $$MAJOR.$$MINOR.$$PATCH-dev"
+	echo "Version bumped to $$MAJOR.$$MINOR.$$PATCH"
 
 icon:
 	swift Scripts/generate_icon.swift
 
 clean:
 	rm -rf .build dist
-
-# Install only works for prod builds
-install:
-	@if grep -q "\-dev" $(BUNDLE)/Contents/Info.plist; then \
-		echo "Error: Cannot install dev version. Run 'make bundle-prod' first."; \
-		exit 1; \
-	fi
-	@VERSION=$$(plutil -extract CFBundleShortVersionString raw $(BUNDLE)/Contents/Info.plist); \
-	echo "Installing $(APP_NAME) v$$VERSION to /Applications"
-	rm -rf /Applications/$(APP_NAME).app
-	cp -r $(BUNDLE) /Applications/
-
-run: bundle
-	open $(BUNDLE)
 
 version:
 	@cat $(VERSION_FILE)

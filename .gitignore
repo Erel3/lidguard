@@ -18,5 +18,8 @@ xcuserdata/
 # Config (credentials)
 .config/
 
+# Release notes (local only)
+RELEASE_NOTES.md
+
 # Claude Code
 CLAUDE.md

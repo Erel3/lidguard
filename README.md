@@ -65,8 +65,9 @@ Grab the latest `.zip` from [**Releases**](https://github.com/Erel3/lidguard/rel
 ```bash
 git clone https://github.com/Erel3/lidguard.git
 cd lidguard
-make run        # build and open
-make install    # install to /Applications
+make run            # build .app with -dev suffix and open
+make install        # install to /Applications
+make release        # bump version, build, tag, push, create GitHub release
 ```
 
 ## Setup

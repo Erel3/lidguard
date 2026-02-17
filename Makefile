@@ -31,16 +31,24 @@ install:
 	cp -r $(BUNDLE) /Applications/
 
 # Release: bump version, build prod, commit, tag, push, create GH release
-release: _bump build
+#   BUMP=minor make release                          — bump minor
+#   TITLE="Big Update" make release                  — custom title
+#   Requires RELEASE_NOTES.md (deleted after publish)
+release:
+	@test -f RELEASE_NOTES.md || (echo "Error: RELEASE_NOTES.md is required. Write release notes first." && exit 1)
+	@$(MAKE) _bump
+	@$(MAKE) build
 	@$(MAKE) _bundle SUFFIX=
 	@VERSION=$$(cat $(VERSION_FILE)); \
+	TITLE="$${TITLE:-v$$VERSION}"; \
 	git add $(VERSION_FILE) && \
 	git commit -m "chore: bump version to $$VERSION" && \
 	git tag "v$$VERSION" && \
 	cd dist && zip -r $(APP_NAME)-$$VERSION.zip $(APP_NAME).app && cd .. && \
 	git push origin main --tags && \
 	gh release create "v$$VERSION" "dist/$(APP_NAME)-$$VERSION.zip" \
-		--title "v$$VERSION" --generate-notes && \
+		--title "$$TITLE" --notes-file RELEASE_NOTES.md && \
+	rm -f RELEASE_NOTES.md && \
 	echo "Released v$$VERSION"
 
 # Internal: create .app bundle with optional SUFFIX (-dev or empty)

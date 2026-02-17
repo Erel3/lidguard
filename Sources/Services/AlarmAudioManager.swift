@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import os.log
 
 final class AlarmAudioManager {
@@ -8,12 +9,29 @@ final class AlarmAudioManager {
   private var audioEngine: AVAudioEngine?
   private var sourceNode: AVAudioSourceNode?
   private(set) var isPlaying = false
+  private var savedSystemVolume: Float?
+  private let lock = NSLock()
+  private static let savedVolumeKey = "AlarmAudioManager.savedSystemVolume"
 
-  private init() {}
+  private var monitoredDeviceID: AudioObjectID = 0
+  private var volumeListenerBlock: AudioObjectPropertyListenerBlock?
+  private let volumeMonitorQueue = DispatchQueue(label: "com.lidguard.volumemonitor", qos: .userInitiated)
+
+  private init() {
+    restoreSystemVolumeIfNeeded()
+  }
 
   func play() {
+    lock.lock()
+    defer { lock.unlock() }
+
     guard !isPlaying else { return }
     isPlaying = true
+
+    savedSystemVolume = getSystemVolume()
+    persistSavedVolume(savedSystemVolume)
+    setSystemVolume(1.0)
+    startVolumeMonitoring()
 
     let soundName = SettingsService.shared.alarmSound
     let volume = Float(SettingsService.shared.alarmVolume) / 100.0
@@ -26,22 +44,32 @@ final class AlarmAudioManager {
   }
 
   func stop() {
+    lock.lock()
+    defer { lock.unlock() }
+
     guard isPlaying else { return }
     isPlaying = false
+    stopVolumeMonitoring()
 
     player?.stop()
     player = nil
-
     audioEngine?.stop()
     audioEngine = nil
     sourceNode = nil
+
+    if let saved = savedSystemVolume {
+      setSystemVolume(saved)
+      savedSystemVolume = nil
+      clearPersistedVolume()
+    }
 
     Logger.system.info("Alarm stopped")
     ActivityLog.logAsync(.system, "Alarm stopped")
   }
 
   func previewSiren() {
-    guard audioEngine == nil else { return }
+    lock.lock()
+    guard audioEngine == nil else { lock.unlock(); return }
 
     let engine = AVAudioEngine()
     let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
@@ -69,12 +97,20 @@ final class AlarmAudioManager {
       try engine.start()
       self.audioEngine = engine
       self.sourceNode = source
-      DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-        self?.audioEngine?.stop()
-        self?.audioEngine = nil
-        self?.sourceNode = nil
-      }
-    } catch {}
+    } catch {
+      lock.unlock()
+      return
+    }
+    lock.unlock()
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+      guard let self = self else { return }
+      self.lock.lock()
+      self.audioEngine?.stop()
+      self.audioEngine = nil
+      self.sourceNode = nil
+      self.lock.unlock()
+    }
   }
 
   // MARK: - Siren (synthesized)
@@ -117,8 +153,139 @@ final class AlarmAudioManager {
       ActivityLog.logAsync(.system, "Alarm started: Siren")
     } catch {
       Logger.system.error("Failed to start siren: \(error.localizedDescription)")
-      isPlaying = false
+      revertSystemVolume()
     }
+  }
+
+  // MARK: - System Volume
+
+  private func getSystemVolume() -> Float? {
+    var deviceID = AudioObjectID(kAudioObjectSystemObject)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    var address = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    let status = AudioObjectGetPropertyData(
+      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+    )
+    guard status == noErr else {
+      Logger.system.error("Failed to get default output device: OSStatus \(status)")
+      return nil
+    }
+
+    var volume: Float32 = 0
+    size = UInt32(MemoryLayout<Float32>.size)
+    address.mSelector = kAudioHardwareServiceDeviceProperty_VirtualMainVolume
+    address.mScope = kAudioDevicePropertyScopeOutput
+    let volStatus = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &volume)
+    guard volStatus == noErr else {
+      Logger.system.error("Failed to read system volume: OSStatus \(volStatus)")
+      return nil
+    }
+    return volume
+  }
+
+  private func setSystemVolume(_ volume: Float) {
+    var deviceID = AudioObjectID(kAudioObjectSystemObject)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    var address = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    let status = AudioObjectGetPropertyData(
+      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+    )
+    guard status == noErr else {
+      Logger.system.error("Failed to get default output device for volume set: OSStatus \(status)")
+      return
+    }
+
+    var vol = volume
+    size = UInt32(MemoryLayout<Float32>.size)
+    address.mSelector = kAudioHardwareServiceDeviceProperty_VirtualMainVolume
+    address.mScope = kAudioDevicePropertyScopeOutput
+    let setStatus = AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &vol)
+    if setStatus != noErr {
+      Logger.system.error("Failed to set system volume: OSStatus \(setStatus)")
+    }
+  }
+
+  private func persistSavedVolume(_ volume: Float?) {
+    guard let volume = volume else { return }
+    UserDefaults.standard.set(volume, forKey: Self.savedVolumeKey)
+  }
+
+  private func clearPersistedVolume() {
+    UserDefaults.standard.removeObject(forKey: Self.savedVolumeKey)
+  }
+
+  private func restoreSystemVolumeIfNeeded() {
+    guard UserDefaults.standard.object(forKey: Self.savedVolumeKey) != nil else { return }
+    let volume = UserDefaults.standard.float(forKey: Self.savedVolumeKey)
+    setSystemVolume(volume)
+    clearPersistedVolume()
+    Logger.system.info("Restored system volume to \(String(format: "%.0f%%", volume * 100)) after previous session")
+  }
+
+  /// Reverts system volume on playback failure. Called from within play() while lock is held.
+  private func revertSystemVolume() {
+    isPlaying = false
+    stopVolumeMonitoring()
+    if let saved = savedSystemVolume {
+      setSystemVolume(saved)
+      savedSystemVolume = nil
+      clearPersistedVolume()
+    }
+  }
+
+  // MARK: - Volume Enforcement
+
+  /// Registers a CoreAudio listener that snaps volume back to max whenever it changes during alarm playback.
+  private func startVolumeMonitoring() {
+    var deviceID = AudioObjectID(kAudioObjectSystemObject)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    var address = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    guard AudioObjectGetPropertyData(
+      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+    ) == noErr else { return }
+
+    monitoredDeviceID = deviceID
+
+    let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+      guard let self = self, self.isPlaying else { return }
+      if let current = self.getSystemVolume(), current < 1.0 {
+        self.setSystemVolume(1.0)
+      }
+    }
+    volumeListenerBlock = block
+
+    var volAddress = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+      mScope: kAudioDevicePropertyScopeOutput,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    AudioObjectAddPropertyListenerBlock(deviceID, &volAddress, volumeMonitorQueue, block)
+  }
+
+  /// Removes the CoreAudio volume listener.
+  private func stopVolumeMonitoring() {
+    guard monitoredDeviceID != 0, let block = volumeListenerBlock else { return }
+
+    var volAddress = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+      mScope: kAudioDevicePropertyScopeOutput,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    AudioObjectRemovePropertyListenerBlock(monitoredDeviceID, &volAddress, volumeMonitorQueue, block)
+    monitoredDeviceID = 0
+    volumeListenerBlock = nil
   }
 
   // MARK: - System Sound
@@ -127,7 +294,7 @@ final class AlarmAudioManager {
     let url = URL(fileURLWithPath: "/System/Library/Sounds/\(soundName).aiff")
     guard FileManager.default.fileExists(atPath: url.path) else {
       Logger.system.error("Alarm sound not found: \(soundName)")
-      isPlaying = false
+      revertSystemVolume()
       return
     }
 
@@ -140,7 +307,7 @@ final class AlarmAudioManager {
       ActivityLog.logAsync(.system, "Alarm started: \(soundName)")
     } catch {
       Logger.system.error("Failed to play alarm: \(error.localizedDescription)")
-      isPlaying = false
+      revertSystemVolume()
     }
   }
 }

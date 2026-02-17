@@ -22,6 +22,7 @@ enum TheftTrigger {
 
 protocol TheftProtectionDelegate: AnyObject {
   func theftProtectionStateDidChange(_ service: TheftProtectionService, state: ProtectionState)
+  func theftProtectionShortcutTriggered(_ service: TheftProtectionService)
 }
 
 final class TheftProtectionService {
@@ -36,6 +37,7 @@ final class TheftProtectionService {
   private let sleepWakeService: SleepWakeService
   private let powerMonitor: PowerMonitorService
   private let powerButtonMonitor = PowerButtonMonitor()
+  private let globalShortcutService = GlobalShortcutService()
   private let pmsetService = PmsetService.shared
 
   private var trackingTimer: DispatchSourceTimer?
@@ -67,25 +69,42 @@ final class TheftProtectionService {
     self.sleepWakeService.delegate = self
     self.powerMonitor.delegate = self
     self.powerButtonMonitor.delegate = self
+    self.globalShortcutService.delegate = self
+
+    NotificationCenter.default.addObserver(
+      forName: .shortcutSettingsChanged, object: nil, queue: .main
+    ) { [weak self] _ in
+      self?.globalShortcutService.restart()
+    }
   }
 
   func start() {
     deviceInfoCollector.warmUp()
     commandService.start()
     sleepWakeService.start()
+    globalShortcutService.start()
     Logger.theft.info("Started (protection disabled)")
   }
 
   func shutdown() {
     powerMonitor.stop()
     pmsetService.disable()
+    globalShortcutService.stop()
   }
 
-  func enableProtection(notify: Bool = true) {
+  func enableProtection(notify: Bool = true, lockScreen: Bool = false) {
     guard state == .disabled else { return }
 
     let settings = SettingsService.shared
     state = .enabled
+
+    if lockScreen {
+      if Thread.isMainThread {
+        self.lockScreen()
+      } else {
+        DispatchQueue.main.async { self.lockScreen() }
+      }
+    }
     if settings.behaviorSleepPrevention {
       sleepPrevention.enable()
       pmsetService.enable()
@@ -219,7 +238,7 @@ final class TheftProtectionService {
         keyboard = .enabled
       case .theftMode:
         status = "🚨 THEFT MODE ACTIVE"
-        keyboard = .theftMode
+        keyboard = AlarmAudioManager.shared.isPlaying ? .theftModeAlarmOn : .theftMode
       }
 
       let settings = SettingsService.shared
@@ -277,7 +296,9 @@ final class TheftProtectionService {
       guard let self = self else { return }
       self.notificationService.send(
         message: "🚨 <b>\(title)</b>\n\n⚠️ \(subtitle)\n\n\(info.formattedMessage)",
-        keyboard: self.state == .theftMode ? .theftMode : .enabled,
+        keyboard: self.state == .theftMode
+          ? (AlarmAudioManager.shared.isPlaying ? .theftModeAlarmOn : .theftMode)
+          : .enabled,
         completion: nil
       )
     }
@@ -315,9 +336,10 @@ final class TheftProtectionService {
         ActivityLog.logAsync(.theft, "Tracking update #\(self.updateCount) sent")
       }
 
+      let keyboard: TelegramKeyboard = AlarmAudioManager.shared.isPlaying ? .theftModeAlarmOn : .theftMode
       self.notificationService.send(
         message: prefix + info.formattedMessage,
-        keyboard: .theftMode,
+        keyboard: keyboard,
         completion: nil
       )
     }
@@ -362,7 +384,7 @@ extension TheftProtectionService: TelegramCommandDelegate {
     case .status:
       sendStatus()
     case .enable:
-      enableProtection()
+      enableProtection(lockScreen: true)
     case .disable:
       disableProtection(remote: true)
     case .alarm:
@@ -431,5 +453,12 @@ extension TheftProtectionService: PowerButtonDelegate {
     guard SettingsService.shared.triggerPowerButton else { return }
     ActivityLog.logAsync(.trigger, "Power button pressed detected")
     sendShutdownAlert(blocked: false)
+  }
+}
+
+// MARK: - GlobalShortcutDelegate
+extension TheftProtectionService: GlobalShortcutDelegate {
+  func globalShortcutTriggered() {
+    delegate?.theftProtectionShortcutTriggered(self)
   }
 }

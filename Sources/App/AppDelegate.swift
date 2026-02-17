@@ -194,8 +194,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       drawMenuBarIcon(ctx: ctx, size: size, style: style)
     }
     image.unlockFocus()
-    // Alert uses hardcoded red — not a template
-    image.isTemplate = (style != .eyeAlert)
+    // Colored icons (green for enabled, red for alert) — not templates
+    image.isTemplate = (style == .eyeClosed)
     return image
   }
 
@@ -210,11 +210,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let cx = s * 0.5
     let lw = s * 0.065
 
-    if style == .eyeAlert {
+    switch style {
+    case .eyeAlert:
       let red = CGColor(red: 0.9, green: 0.2, blue: 0.15, alpha: 1.0)
       ctx.setStrokeColor(red)
       ctx.setFillColor(red)
-    } else {
+    case .eyeOpen:
+      let green = CGColor(red: 0.2, green: 0.78, blue: 0.35, alpha: 1.0)
+      ctx.setStrokeColor(green)
+      ctx.setFillColor(green)
+    case .eyeClosed:
       ctx.setStrokeColor(.black)
       ctx.setFillColor(.black)
     }
@@ -341,7 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   @objc private func toggleProtection() {
     switch theftProtection.state {
     case .disabled:
-      theftProtection.enableProtection()
+      theftProtection.enableProtection(lockScreen: true)
 
     case .enabled:
       authService.authenticate(reason: "Authenticate to disable protection") { [weak self] success in
@@ -396,6 +401,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 // MARK: - TheftProtectionDelegate
 extension AppDelegate: TheftProtectionDelegate {
+  func theftProtectionShortcutTriggered(_ service: TheftProtectionService) {
+    switch service.state {
+    case .disabled:
+      service.enableProtection(lockScreen: true)
+    case .enabled:
+      authService.authenticate(reason: "Authenticate to disable protection") { [weak self] success in
+        guard success else { return }
+        self?.theftProtection.disableProtection()
+      }
+    case .theftMode:
+      break
+    }
+  }
+
   func theftProtectionStateDidChange(_ service: TheftProtectionService, state: ProtectionState) {
     CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { [weak self] in
       // Force close menu if open (critical for theft mode activation)

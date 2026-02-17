@@ -18,6 +18,11 @@ final class SettingsService {
     static let triggerPowerDisconnect = "lidguard.triggerPowerDisconnect"
     static let triggerPowerButton = "lidguard.triggerPowerButton"
 
+    // Global Shortcut
+    static let shortcutKeyCode = "lidguard.shortcutKeyCode"
+    static let shortcutModifiers = "lidguard.shortcutModifiers"
+    static let shortcutEnabled = "lidguard.shortcutEnabled"
+
     // Behaviors
     static let behaviorSleepPrevention = "lidguard.behaviorSleepPrevention"
     static let behaviorShutdownBlocking = "lidguard.behaviorShutdownBlocking"
@@ -145,6 +150,27 @@ final class SettingsService {
     set { defaults.set(newValue, forKey: Keys.triggerPowerButton) }
   }
 
+  // MARK: - Global Shortcut
+
+  var shortcutKeyCode: Int {
+    get { defaults.object(forKey: Keys.shortcutKeyCode) as? Int ?? -1 }
+    set { defaults.set(newValue, forKey: Keys.shortcutKeyCode) }
+  }
+
+  var shortcutModifiers: UInt {
+    get { defaults.object(forKey: Keys.shortcutModifiers) as? UInt ?? 0 }
+    set { defaults.set(newValue, forKey: Keys.shortcutModifiers) }
+  }
+
+  var shortcutEnabled: Bool {
+    get { defaults.object(forKey: Keys.shortcutEnabled) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.shortcutEnabled) }
+  }
+
+  var isShortcutConfigured: Bool {
+    shortcutKeyCode >= 0 && shortcutModifiers != 0
+  }
+
   // MARK: - Behaviors
 
   var behaviorSleepPrevention: Bool {
@@ -195,6 +221,9 @@ final class SettingsService {
     defaults.removeObject(forKey: Keys.triggerLidClose)
     defaults.removeObject(forKey: Keys.triggerPowerDisconnect)
     defaults.removeObject(forKey: Keys.triggerPowerButton)
+    defaults.removeObject(forKey: Keys.shortcutKeyCode)
+    defaults.removeObject(forKey: Keys.shortcutModifiers)
+    defaults.removeObject(forKey: Keys.shortcutEnabled)
     defaults.removeObject(forKey: Keys.behaviorSleepPrevention)
     defaults.removeObject(forKey: Keys.behaviorShutdownBlocking)
     defaults.removeObject(forKey: Keys.behaviorLockScreen)

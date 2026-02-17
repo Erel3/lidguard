@@ -36,6 +36,11 @@ struct SettingsView: View {
   @State private var triggerPowerDisconnect: Bool = true
   @State private var triggerPowerButton: Bool = false
 
+  // Global Shortcut
+  @State private var shortcutEnabled: Bool = false
+  @State private var shortcutKeyCode: Int = -1
+  @State private var shortcutModifiers: UInt = 0
+
   // Protection
   @State private var behaviorSleepPrevention: Bool = true
   @State private var sleepPreventionInstalled: Bool = false
@@ -211,6 +216,31 @@ struct SettingsView: View {
           .font(.footnote)
           .foregroundStyle(.secondary)
       }
+
+      Section {
+        Toggle("Enable global shortcut", isOn: $shortcutEnabled)
+        if shortcutEnabled {
+          LabeledContent("Shortcut") {
+            HStack(spacing: 8) {
+              ShortcutRecorderView(keyCode: $shortcutKeyCode, modifiers: $shortcutModifiers)
+                .frame(width: 160, height: 24)
+              if shortcutKeyCode >= 0 && shortcutModifiers != 0 {
+                Button("Clear") {
+                  shortcutKeyCode = -1
+                  shortcutModifiers = 0
+                }
+                .buttonStyle(.borderless)
+              }
+            }
+          }
+        }
+      } header: {
+        Text("Global Keyboard Shortcut")
+      } footer: {
+        Text("Press the shortcut anywhere to enable protection and lock screen. Requires Accessibility permission.")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      }
     }
     .formStyle(.grouped)
   }
@@ -331,6 +361,9 @@ struct SettingsView: View {
     triggerLidClose = settings.triggerLidClose
     triggerPowerDisconnect = settings.triggerPowerDisconnect
     triggerPowerButton = settings.triggerPowerButton
+    shortcutEnabled = settings.shortcutEnabled
+    shortcutKeyCode = settings.shortcutKeyCode
+    shortcutModifiers = UInt(settings.shortcutModifiers)
     behaviorSleepPrevention = settings.behaviorSleepPrevention
     behaviorShutdownBlocking = settings.behaviorShutdownBlocking
     behaviorLockScreen = settings.behaviorLockScreen
@@ -352,6 +385,10 @@ struct SettingsView: View {
     settings.triggerLidClose = triggerLidClose
     settings.triggerPowerDisconnect = triggerPowerDisconnect
     settings.triggerPowerButton = triggerPowerButton
+    settings.shortcutEnabled = shortcutEnabled
+    settings.shortcutKeyCode = shortcutKeyCode
+    settings.shortcutModifiers = UInt(shortcutModifiers)
+    NotificationCenter.default.post(name: .shortcutSettingsChanged, object: nil)
     settings.behaviorSleepPrevention = behaviorSleepPrevention
     settings.behaviorShutdownBlocking = behaviorShutdownBlocking
     settings.behaviorLockScreen = behaviorLockScreen

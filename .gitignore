@@ -16,3 +16,6 @@ xcuserdata/
 
 # Config (credentials)
 .config/
+
+# Claude Code
+CLAUDE.md

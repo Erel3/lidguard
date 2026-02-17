@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Resources/AppIcon.icns" width="128" height="128" alt="LidGuard icon">
+  <img src="Resources/AppIcon.png" width="128" height="128" alt="LidGuard icon">
 </p>
 
 <h1 align="center">LidGuard</h1>

@@ -104,10 +104,10 @@ final class ActivityLog: ObservableObject {
   private func saveToDisk() {
     guard logFileURL != nil else { return }
     saveDebounceTimer?.cancel()
-    let timer = DispatchSource.makeTimerSource(queue: saveQueue)
+    let timer = DispatchSource.makeTimerSource(queue: .main)
     timer.schedule(deadline: .now() + Self.saveDebounceInterval)
     timer.setEventHandler { [weak self] in
-      Task { @MainActor [weak self] in
+      MainActor.assumeIsolated {
         self?.flushToDisk()
       }
     }

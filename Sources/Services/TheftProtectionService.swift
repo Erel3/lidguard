@@ -63,6 +63,11 @@ final class TheftProtectionService {
   private var stateBeforeTheft: ProtectionState?
   private var offlineSirenTimer: DispatchSourceTimer?
   private var telegramSucceededInTheftMode = false
+  private var helperInstallGeneration = 0
+  private var theftEpisodeId = 0
+  // Bluetooth auto-disarm consent, revoked on theft, re-granted on manual BT re-arm.
+  private var bleAutoDisarmArmed = false
+  private var screenUnlockObserver: NSObjectProtocol?
 
   /// Grace period after arming (or re-arming from theft mode) during which
   /// motion triggers are suppressed, so the baseline has a chance to
@@ -154,11 +159,16 @@ final class TheftProtectionService {
   }
 
   private func handleHelperInstallCompleted() {
-    // Retry a few times — helper may not be running yet after manual install
+    // Retry a few times — helper may not be running yet after manual install.
+    // Track a generation so stale retries from a prior install event bail out.
+    helperInstallGeneration &+= 1
+    let gen = helperInstallGeneration
     for delay in [0.0, 2.0, 5.0, 10.0] {
       DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
         MainActor.assumeIsolated {
-          guard let self, !self.daemonClient.isConnected else { return }
+          guard let self,
+                gen == self.helperInstallGeneration,
+                !self.daemonClient.isConnected else { return }
           self.daemonClient.reconnectNow()
         }
       }
@@ -177,18 +187,6 @@ final class TheftProtectionService {
       bluetoothProximityService.start()
     }
 
-    DistributedNotificationCenter.default().addObserver(
-      forName: NSNotification.Name("com.apple.screenIsUnlocked"),
-      object: nil, queue: .main
-    ) { [weak self] _ in
-      MainActor.assumeIsolated {
-        guard let self, self.state == .theftMode else { return }
-        Logger.theft.info("Screen unlocked — deactivating theft mode")
-        ActivityLog.logAsync(.theft, "Screen unlocked — owner authenticated")
-        self.deactivateTheftMode()
-      }
-    }
-
     Logger.theft.info("Started (protection disabled)")
   }
 
@@ -199,6 +197,13 @@ final class TheftProtectionService {
     powerMonitor.stop()
     globalShortcutService.stop()
     bluetoothProximityService.stop()
+    stopTracking()
+    cancelOfflineSirenTimer()
+    sleepPrevention.disable()
+    if let observer = screenUnlockObserver {
+      DistributedNotificationCenter.default().removeObserver(observer)
+      screenUnlockObserver = nil
+    }
     daemonClient.disablePmset()
     daemonClient.disablePowerButton()
     daemonClient.disableMotionMonitoring()
@@ -302,6 +307,7 @@ final class TheftProtectionService {
     guard state == .disabled else { return }
 
     state = .enabledBluetooth
+    bleAutoDisarmArmed = true
 
     if SettingsService.shared.lockScreenOnBluetoothArm {
       self.lockScreen()
@@ -326,6 +332,7 @@ final class TheftProtectionService {
 
     let wasBluetooth = state == .enabledBluetooth
     state = .disabled
+    bleAutoDisarmArmed = false
     // Only set cooldown for genuine manual disarms (not bluetooth auto-disarm)
     if !wasBluetooth {
       lastManualDisarmTime = Date()
@@ -371,6 +378,8 @@ final class TheftProtectionService {
     state = .theftMode
     currentTrigger = trigger
     updateCount = 0
+    theftEpisodeId &+= 1
+    bleAutoDisarmArmed = false
     Logger.theft.warning("THEFT MODE ACTIVATED - \(trigger.description)")
     ActivityLog.logAsync(.theft, "THEFT MODE ACTIVATED - \(trigger.description)")
     // Stop motion monitoring while in theft mode (the main-app gate would
@@ -579,13 +588,16 @@ final class TheftProtectionService {
     }
 
     let keyboard: TelegramKeyboard = AlarmAudioManager.shared.isPlaying ? .theftModeAlarmOn : .theftMode
+    let episode = theftEpisodeId
     notificationService.send(
       message: prefix + info.formattedMessage,
       keyboard: keyboard
     ) { [weak self] success in
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
-          guard let self, self.state == .theftMode else { return }
+          guard let self,
+                self.state == .theftMode,
+                self.theftEpisodeId == episode else { return }
           if success {
             self.telegramSucceededInTheftMode = true
             self.cancelOfflineSirenTimer()
@@ -720,8 +732,10 @@ extension TheftProtectionService: SleepWakeDelegate {
     }
     bluetoothProximityService.resume()
     commandService.resume()
-    // Laptop may have been moved during sleep — rebaseline motion.
-    recalibrateMotion()
+    // Only rebaseline motion if actually armed — avoids keeping helper alive on disarmed boot/wake.
+    if state == .enabled || state == .enabledBluetooth {
+      recalibrateMotion()
+    }
   }
 
   func shouldDenySleep() -> Bool {
@@ -770,6 +784,11 @@ extension TheftProtectionService: BluetoothProximityDelegate {
   func bluetoothProximityDeviceReturned(_ service: BluetoothProximityService, device: TrustedBLEDevice) {
     guard SettingsService.shared.bluetoothAutoArmEnabled else { return }
     guard state == .enabledBluetooth else { return }
+    // Consent revoked on theft → require manual re-arm cycle before honoring.
+    guard bleAutoDisarmArmed else {
+      Logger.bluetooth.info("Skipping auto-disarm — consent revoked by prior theft episode")
+      return
+    }
 
     Logger.bluetooth.info("Auto-disarming — device returned: \(device.name)")
     ActivityLog.logAsync(.bluetooth, "Auto-disarming — \(device.name) returned")

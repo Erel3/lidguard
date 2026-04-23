@@ -43,6 +43,10 @@ final class DaemonIPCClient: DaemonIPC, @unchecked Sendable {
   private var buffer = Data()
   private var pendingCommands: [IPCCommand] = []
   private var hasLoggedConnectionRefused = false
+  private var authFailedOnce = false
+  /// Max bytes buffered before a newline arrives — prevents runaway growth
+  /// if the peer writes garbage.
+  private static let maxBufferBytes = 256 * 1024
 
   private enum ConnectionState {
     case disconnected
@@ -263,6 +267,12 @@ final class DaemonIPCClient: DaemonIPC, @unchecked Sendable {
       self?.queue.async {
         if let data, !data.isEmpty {
           self?.buffer.append(data)
+          if (self?.buffer.count ?? 0) > Self.maxBufferBytes {
+            Logger.daemon.error("Daemon recv buffer exceeded \(Self.maxBufferBytes)B — disconnecting")
+            self?.tearDown()
+            self?.scheduleReconnect()
+            return
+          }
           self?.processBuffer()
         }
         if let error {
@@ -340,6 +350,7 @@ final class DaemonIPCClient: DaemonIPC, @unchecked Sendable {
     if message.success == true {
       state = .connected
       reconnectDelay = Config.Daemon.reconnectBaseDelay
+      authFailedOnce = false
       // Helper's MotionMonitor session counter resets on every (re)launch, so
       // a fresh auth means the cached `_motionSession` from a previous helper
       // instance is no longer a valid lower bound — reset it.
@@ -351,8 +362,16 @@ final class DaemonIPCClient: DaemonIPC, @unchecked Sendable {
         guard let self else { return }
         self.delegate?.daemonDidConnect(self, version: version)
       }
+    } else if !authFailedOnce {
+      // First auth failure: could be a transient SecCode cache stutter right
+      // after an app/helper reinstall. Tear down and retry once with the
+      // normal backoff before permanently disabling reconnects.
+      authFailedOnce = true
+      Logger.daemon.warning("Authentication failed — retrying once before giving up")
+      tearDown()
+      scheduleReconnect()
     } else {
-      Logger.daemon.error("Authentication failed — code signing verification rejected")
+      Logger.daemon.error("Authentication failed twice — code signing verification rejected")
       shouldReconnect = false
       tearDown()
     }

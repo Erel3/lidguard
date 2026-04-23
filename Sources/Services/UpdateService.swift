@@ -20,6 +20,13 @@ final class UpdateService {
 
   func startPeriodicChecks() {
     guard settings.autoUpdateEnabled else { return }
+    #if DEBUG
+    // In DEBUG the bundled CFBundleShortVersionString can be a stub like "1.0"
+    // which would make us think we're wildly behind and self-overwrite the dev
+    // binary with a release build. Skip entirely.
+    logger.info("Auto-update disabled in DEBUG build")
+    return
+    #else
 
     if !initialCheckDone {
       initialCheckDone = true
@@ -29,6 +36,7 @@ final class UpdateService {
     }
 
     schedulePeriodicTimer()
+    #endif
   }
 
   func stopPeriodicChecks() {
@@ -349,19 +357,30 @@ final class UpdateService {
   // MARK: - Version Comparison
 
   nonisolated private func isNewer(_ remote: String, than local: String) -> Bool {
-    func parts(_ v: String) -> [Int] {
-      let clean = v.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-        .split(separator: "-").first.map(String.init) ?? v
-      return clean.split(separator: ".").compactMap { Int($0) }
-    }
-    let r = parts(remote), l = parts(local)
-    let count = max(r.count, l.count)
+    let (rCore, rPre) = splitPrerelease(remote)
+    let (lCore, lPre) = splitPrerelease(local)
+    let count = max(rCore.count, lCore.count)
     for i in 0..<count {
-      let rv = i < r.count ? r[i] : 0
-      let lv = i < l.count ? l[i] : 0
+      let rv = i < rCore.count ? rCore[i] : 0
+      let lv = i < lCore.count ? lCore[i] : 0
       if rv != lv { return rv > lv }
     }
-    return false
+    // Cores equal — prerelease < release per semver. 1.2.3-beta.1 < 1.2.3.
+    switch (rPre, lPre) {
+    case (nil, nil): return false
+    case (nil, _?): return true    // remote release newer than local prerelease
+    case (_?, nil): return false   // remote prerelease older than local release
+    case let (r?, l?): return r > l
+    }
+  }
+
+  nonisolated private func splitPrerelease(_ v: String) -> ([Int], String?) {
+    let stripped = v.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
+    let comps = stripped.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+    let coreStr = comps.first.map(String.init) ?? stripped
+    let core = coreStr.split(separator: ".").compactMap { Int($0) }
+    let pre = comps.count > 1 ? String(comps[1]) : nil
+    return (core, pre)
   }
 
   // MARK: - Alerts

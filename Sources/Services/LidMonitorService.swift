@@ -45,7 +45,9 @@ final class LidMonitorService {
   }
 
   private func checkState() {
-    let currentState = Self.getClamshellState()
+    // Skip tick entirely on IOKit transient failure; previous "false" default
+    // could mask a close or fabricate an open across sleep/wake transitions.
+    guard let currentState = Self.readClamshellState() else { return }
 
     if let last = lastState {
       if !last && currentState {
@@ -58,14 +60,21 @@ final class LidMonitorService {
     lastState = currentState
   }
 
+  /// Synchronous read for one-shot queries (status command, sleep handler).
+  /// Falls back to the last observed state on IOKit failure; defaults to
+  /// `false` (open) only if we've never read a valid value.
   nonisolated private static func getClamshellState() -> Bool {
+    readClamshellState() ?? false
+  }
+
+  nonisolated private static func readClamshellState() -> Bool? {
     let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
-    guard service != 0 else { return false }
+    guard service != 0 else { return nil }
     defer { IOObjectRelease(service) }
 
-    if let prop = IORegistryEntryCreateCFProperty(service, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0) {
-      return prop.takeRetainedValue() as? Bool ?? false
-    }
-    return false
+    guard let prop = IORegistryEntryCreateCFProperty(
+      service, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0
+    ) else { return nil }
+    return prop.takeRetainedValue() as? Bool
   }
 }

@@ -8,21 +8,28 @@ enum KeychainService {
   static func save(key: String, value: String) -> Bool {
     guard let data = value.data(using: .utf8) else { return false }
 
-    let deleteQuery: [String: Any] = [
+    // Try update first — avoids the old delete-then-add race that could
+    // leave the keychain empty if add failed after delete succeeded.
+    let locator: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: serviceName,
       kSecAttrAccount as String: key,
     ]
-    SecItemDelete(deleteQuery as CFDictionary)
-
-    let addQuery: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: serviceName,
-      kSecAttrAccount as String: key,
+    let updateAttrs: [String: Any] = [
       kSecValueData as String: data,
       kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
     ]
+    let updateStatus = SecItemUpdate(locator as CFDictionary, updateAttrs as CFDictionary)
+    if updateStatus == errSecSuccess {
+      return true
+    }
+    if updateStatus != errSecItemNotFound {
+      return false
+    }
 
+    var addQuery = locator
+    addQuery[kSecValueData as String] = data
+    addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
     return SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess
   }
 

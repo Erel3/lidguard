@@ -63,6 +63,8 @@ final class ActivityLog: ObservableObject {
   private let maxEntries = 500
   private let saveQueue = DispatchQueue(label: "com.akim.lidguard.activitylog")
   private var logFileURL: URL?
+  private var saveDebounceTimer: DispatchSourceTimer?
+  private static let saveDebounceInterval: TimeInterval = 1.5
 
   private init() {
     setupLogFile()
@@ -79,14 +81,41 @@ final class ActivityLog: ObservableObject {
 
   private func loadFromDisk() {
     guard let url = logFileURL,
-          let data = try? Data(contentsOf: url),
-          let saved = try? JSONDecoder().decode([LogEntry].self, from: data) else {
+          let data = try? Data(contentsOf: url) else {
       return
     }
-    entries = saved
+    // Decode lenient: if the array as a whole fails (e.g., new enum case added),
+    // skip problematic entries so the log isn't wiped on schema drift.
+    if let saved = try? JSONDecoder().decode([LogEntry].self, from: data) {
+      entries = saved
+      return
+    }
+    if let raw = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+      let decoder = JSONDecoder()
+      entries = raw.compactMap { item -> LogEntry? in
+        guard let itemData = try? JSONSerialization.data(withJSONObject: item) else { return nil }
+        return try? decoder.decode(LogEntry.self, from: itemData)
+      }
+    }
   }
 
+  /// Debounced disk write — coalesces bursts (e.g., tracking loop spikes)
+  /// into one atomic write per `saveDebounceInterval`.
   private func saveToDisk() {
+    guard logFileURL != nil else { return }
+    saveDebounceTimer?.cancel()
+    let timer = DispatchSource.makeTimerSource(queue: saveQueue)
+    timer.schedule(deadline: .now() + Self.saveDebounceInterval)
+    timer.setEventHandler { [weak self] in
+      Task { @MainActor [weak self] in
+        self?.flushToDisk()
+      }
+    }
+    saveDebounceTimer = timer
+    timer.resume()
+  }
+
+  private func flushToDisk() {
     guard let url = logFileURL else { return }
     let entriesToSave = entries
     saveQueue.async {

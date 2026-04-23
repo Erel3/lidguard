@@ -11,6 +11,8 @@ final class AlarmAudioManager {
   private var sourceNode: AVAudioSourceNode?
   private(set) var isPlaying = false
   private var savedSystemVolume: Float?
+  private var savedDefaultOutputDevice: AudioObjectID = 0
+  private var didSwitchOutput = false
   private var previewActive = false
   private var previewGeneration: Int = 0
   private static let savedVolumeKey = "AlarmAudioManager.savedSystemVolume"
@@ -25,6 +27,10 @@ final class AlarmAudioManager {
   func play() {
     guard !isPlaying else { return }
     isPlaying = true
+
+    // Route audio to built-in speakers before raising volume so the siren
+    // is audible in the room even when AirPods/headphones are connected.
+    routeToBuiltInSpeakers()
 
     savedSystemVolume = getSystemVolume()
     persistSavedVolume(savedSystemVolume)
@@ -57,6 +63,7 @@ final class AlarmAudioManager {
       savedSystemVolume = nil
       clearPersistedVolume()
     }
+    restoreDefaultOutputDevice()
 
     Logger.system.info("Alarm stopped")
     ActivityLog.logAsync(.system, "Alarm stopped")
@@ -267,6 +274,116 @@ final class AlarmAudioManager {
       savedSystemVolume = nil
       clearPersistedVolume()
     }
+  }
+
+  // MARK: - Output Device Routing
+
+  /// Looks up the built-in speaker AudioObjectID, remembers the current
+  /// default output, and switches to built-in so the siren isn't routed to
+  /// AirPods / USB DAC / HDMI that the thief might have plugged in.
+  private func routeToBuiltInSpeakers() {
+    guard let builtin = findBuiltInOutputDevice() else { return }
+
+    var currentDefault = AudioObjectID(0)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    var address = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    let getStatus = AudioObjectGetPropertyData(
+      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &currentDefault
+    )
+    guard getStatus == noErr else { return }
+
+    if currentDefault == builtin {
+      return
+    }
+
+    var newDefault = builtin
+    let setStatus = AudioObjectSetPropertyData(
+      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil,
+      UInt32(MemoryLayout<AudioObjectID>.size), &newDefault
+    )
+    if setStatus == noErr {
+      savedDefaultOutputDevice = currentDefault
+      didSwitchOutput = true
+      Logger.system.info("Alarm: routed audio to built-in speakers")
+    } else {
+      Logger.system.error("Alarm: failed to switch to built-in output (OSStatus \(setStatus))")
+    }
+  }
+
+  private func restoreDefaultOutputDevice() {
+    guard didSwitchOutput, savedDefaultOutputDevice != 0 else {
+      savedDefaultOutputDevice = 0
+      didSwitchOutput = false
+      return
+    }
+    var address = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    var prev = savedDefaultOutputDevice
+    let setStatus = AudioObjectSetPropertyData(
+      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil,
+      UInt32(MemoryLayout<AudioObjectID>.size), &prev
+    )
+    if setStatus != noErr {
+      Logger.system.error("Alarm: failed to restore prior output (OSStatus \(setStatus))")
+    }
+    savedDefaultOutputDevice = 0
+    didSwitchOutput = false
+  }
+
+  private func findBuiltInOutputDevice() -> AudioObjectID? {
+    var size: UInt32 = 0
+    var address = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyDevices,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    guard AudioObjectGetPropertyDataSize(
+      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
+    ) == noErr, size > 0 else { return nil }
+
+    let count = Int(size) / MemoryLayout<AudioObjectID>.size
+    var devices = [AudioObjectID](repeating: 0, count: count)
+    guard AudioObjectGetPropertyData(
+      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &devices
+    ) == noErr else { return nil }
+
+    for device in devices where isBuiltInOutputDevice(device) {
+      return device
+    }
+    return nil
+  }
+
+  private func isBuiltInOutputDevice(_ device: AudioObjectID) -> Bool {
+    var transport: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    var tAddr = AudioObjectPropertyAddress(
+      mSelector: kAudioDevicePropertyTransportType,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    guard AudioObjectGetPropertyData(device, &tAddr, 0, nil, &size, &transport) == noErr,
+          transport == kAudioDeviceTransportTypeBuiltIn else {
+      return false
+    }
+
+    // Must have output streams to be usable as an output device.
+    var streamsSize: UInt32 = 0
+    var sAddr = AudioObjectPropertyAddress(
+      mSelector: kAudioDevicePropertyStreams,
+      mScope: kAudioDevicePropertyScopeOutput,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    guard AudioObjectGetPropertyDataSize(device, &sAddr, 0, nil, &streamsSize) == noErr else {
+      return false
+    }
+    return streamsSize > 0
   }
 
   // MARK: - Volume Enforcement

@@ -10,6 +10,14 @@ struct DeviceInfo: Sendable {
   let isCharging: Bool?
   let deviceName: String
 
+  /// Escapes `<`, `>`, `&` for Telegram parse_mode=HTML so user-controlled strings
+  /// (Wi-Fi SSID, device name) can't break the message or inject markup.
+  private func htmlEscape(_ s: String) -> String {
+    s.replacingOccurrences(of: "&", with: "&amp;")
+      .replacingOccurrences(of: "<", with: "&lt;")
+      .replacingOccurrences(of: ">", with: "&gt;")
+  }
+
   var formattedMessage: String {
     var lines: [String] = []
 
@@ -32,7 +40,7 @@ struct DeviceInfo: Sendable {
     }
 
     if let wifi = wifiName {
-      lines.append("📶 <b>WiFi:</b> \(wifi)")
+      lines.append("📶 <b>WiFi:</b> \(htmlEscape(wifi))")
     }
 
     if let level = batteryLevel {
@@ -41,7 +49,7 @@ struct DeviceInfo: Sendable {
     }
 
     if !deviceName.isEmpty {
-      lines.append("💻 <b>Device:</b> \(deviceName)")
+      lines.append("💻 <b>Device:</b> \(htmlEscape(deviceName))")
     }
 
     return lines.joined(separator: "\n")

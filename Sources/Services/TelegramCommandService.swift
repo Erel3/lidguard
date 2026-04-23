@@ -26,10 +26,18 @@ final class TelegramCommandService {
   private var lastUpdateId: Int?
   private let pollInterval: TimeInterval
   private var isPolling = false
+  private var seeded = false
 
-  init(session: URLSession = .shared,
+  init(session: URLSession? = nil,
        pollInterval: TimeInterval = 3.0) {
-    self.session = session
+    if let session {
+      self.session = session
+    } else {
+      let cfg = URLSessionConfiguration.default
+      cfg.timeoutIntervalForRequest = 15
+      cfg.timeoutIntervalForResource = 30
+      self.session = URLSession(configuration: cfg)
+    }
     self.pollInterval = pollInterval
   }
 
@@ -39,14 +47,22 @@ final class TelegramCommandService {
       return
     }
 
-    schedulePolling(initialDeadline: .now())
-    Logger.telegram.info("Command polling started")
-    ActivityLog.logAsync(.telegram, "Command polling started")
+    // Seed lastUpdateId from newest update so cold start / token change doesn't replay backlog.
+    seedLastUpdateId { [weak self] in
+      guard let self else { return }
+      self.seeded = true
+      self.schedulePolling(initialDeadline: .now())
+      Logger.telegram.info("Command polling started")
+      ActivityLog.logAsync(.telegram, "Command polling started")
+    }
   }
 
   func stop() {
     timer?.cancel()
     timer = nil
+    // Reset so bot-token change doesn't strand us with stale offset for a different bot.
+    lastUpdateId = nil
+    seeded = false
     Logger.telegram.info("Command polling stopped")
   }
 
@@ -63,6 +79,31 @@ final class TelegramCommandService {
     Logger.telegram.info("Command polling resumed after wake")
   }
 
+  /// Fetches the most recent update with offset=-1 to set lastUpdateId, so historical
+  /// commands (e.g., a /stop from last week) do not fire on cold start.
+  private func seedLastUpdateId(completion: @escaping @MainActor () -> Void) {
+    guard let botToken = Config.Telegram.botToken else { completion(); return }
+    let urlString = "https://api.telegram.org/bot\(botToken)/getUpdates?offset=-1&timeout=0"
+    guard let url = URL(string: urlString) else { completion(); return }
+
+    session.dataTask(with: url) { [weak self] data, _, _ in
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          if let data,
+             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+             let ok = json["ok"] as? Bool, ok,
+             let results = json["result"] as? [[String: Any]],
+             let lastUpdate = results.last,
+             let updateId = lastUpdate["update_id"] as? Int {
+            self.lastUpdateId = updateId
+          }
+          completion()
+        }
+      }
+    }.resume()
+  }
+
   private func schedulePolling(initialDeadline: DispatchTime) {
     let newTimer = DispatchSource.makeTimerSource(queue: .main)
     newTimer.schedule(deadline: initialDeadline, repeating: pollInterval)
@@ -76,6 +117,7 @@ final class TelegramCommandService {
   }
 
   private func pollUpdates() {
+    guard seeded else { return }
     guard !isPolling else { return }
     guard let botToken = Config.Telegram.botToken,
           let chatId = Config.Telegram.chatId else { return }
@@ -97,7 +139,11 @@ final class TelegramCommandService {
         MainActor.assumeIsolated {
           guard let self else { return }
           defer { self.isPolling = false }
-          guard let data, error == nil else { return }
+          if let error {
+            Logger.telegram.debug("Poll error: \(NetworkRetry.redact(error.localizedDescription))")
+            return
+          }
+          guard let data else { return }
           self.parseUpdates(data, chatId: chatId)
         }
       }
@@ -131,21 +177,26 @@ final class TelegramCommandService {
   }
 
   private func parseCommand(_ text: String) -> TelegramCommand? {
-    let trimmed = text.lowercased().trimmingCharacters(in: .whitespaces)
+    let trimmed = text.trimmingCharacters(in: .whitespaces).lowercased()
 
-    // Exact slash commands
     if let command = TelegramCommand(rawValue: trimmed) {
       return command
     }
 
-    // Exact button text matching
-    switch trimmed {
-    case "✅ safe": return .safe
-    case "📊 status": return .status
-    case "🟢 enable": return .enable
-    case "🔴 disable": return .disable
-    case "🔊 alarm": return .alarm
-    case "🔇 stop alarm": return .stopalarm
+    // Strip emoji/variant-selector characters so "🔴 Disable" matches "disable" and
+    // "🔴︎ Disable" (with variant selector) still matches.
+    let stripped = trimmed.unicodeScalars
+      .filter { !$0.properties.isEmoji && !($0.value >= 0xFE00 && $0.value <= 0xFE0F) }
+      .reduce(into: "") { $0.append(Character($1)) }
+      .trimmingCharacters(in: .whitespaces)
+
+    switch stripped {
+    case "safe": return .safe
+    case "status": return .status
+    case "enable": return .enable
+    case "disable": return .disable
+    case "alarm": return .alarm
+    case "stop alarm": return .stopalarm
     default: return nil
     }
   }

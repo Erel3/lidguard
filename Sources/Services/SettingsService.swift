@@ -27,6 +27,7 @@ final class SettingsService {
 
     // Triggers
     static let triggerLidClose = "lidguard.triggerLidClose"
+    static let suppressLidTriggerWhenExternalDisplay = "lidguard.suppressLidTriggerWhenExternalDisplay"
     static let triggerPowerDisconnect = "lidguard.triggerPowerDisconnect"
     static let triggerPowerButton = "lidguard.triggerPowerButton"
     static let triggerMotionDetect = "lidguard.triggerMotionDetect"
@@ -150,6 +151,13 @@ final class SettingsService {
   var triggerLidClose: Bool {
     get { defaults.object(forKey: Keys.triggerLidClose) as? Bool ?? true }
     set { defaults.set(newValue, forKey: Keys.triggerLidClose) }
+  }
+
+  /// When an external display is attached, suppress the lid-close trigger —
+  /// clamshell mode at a dock is normal use, not theft.
+  var suppressLidTriggerWhenExternalDisplay: Bool {
+    get { defaults.object(forKey: Keys.suppressLidTriggerWhenExternalDisplay) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.suppressLidTriggerWhenExternalDisplay) }
   }
 
   var triggerPowerDisconnect: Bool {

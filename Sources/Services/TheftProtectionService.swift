@@ -55,7 +55,7 @@ final class TheftProtectionService {
   private let globalShortcutService = GlobalShortcutService()
   private let bluetoothProximityService = BluetoothProximityService()
 
-  private var lastManualDisarmTime: Date?
+  var lastManualDisarmTime: Date?
   var lastArmTime: Date?
   private var trackingTimer: DispatchSourceTimer?
   private var updateCount = 0
@@ -65,15 +65,12 @@ final class TheftProtectionService {
   private var telegramSucceededInTheftMode = false
   private var helperInstallGeneration = 0
   private var theftEpisodeId = 0
-  // Bluetooth auto-disarm consent, revoked on theft, re-granted on manual BT re-arm.
-  private var bleAutoDisarmArmed = false
+  var bleAutoDisarmArmed = false
+  // Blocks clamshell-sleep theft when a lid-close was suppressed by ext display.
+  private var suppressedLidClose = false
   private var screenUnlockObserver: NSObjectProtocol?
 
-  /// Grace period after arming (or re-arming from theft mode) during which
-  /// motion triggers are suppressed, so the baseline has a chance to
-  /// calibrate without capturing the owner's hands-on-laptop gesture.
-  /// ~500ms covers the TCP round-trip, SPU wake, and calibration; the
-  /// rest is slack for the user to let go of the lid.
+  /// Grace period after arming during which motion triggers are suppressed.
   static let motionArmGrace: TimeInterval = 3
 
   private(set) var state: ProtectionState = .disabled
@@ -261,9 +258,7 @@ final class TheftProtectionService {
     lastArmTime = Date()
   }
 
-  /// Apply a mid-arm toggle of the motion setting. Only meaningful when
-  /// protection is actively armed — otherwise startMonitors/disableProtection
-  /// handle lifecycle on their own.
+  /// Apply a mid-arm toggle of the motion setting.
   private func handleMotionSettingsChange() {
     guard state == .enabled || state == .enabledBluetooth else { return }
     if SettingsService.shared.triggerMotionDetect && daemonClient.motionSupported {
@@ -333,6 +328,7 @@ final class TheftProtectionService {
     let wasBluetooth = state == .enabledBluetooth
     state = .disabled
     bleAutoDisarmArmed = false
+    suppressedLidClose = false
     // Only set cooldown for genuine manual disarms (not bluetooth auto-disarm)
     if !wasBluetooth {
       lastManualDisarmTime = Date()
@@ -380,6 +376,7 @@ final class TheftProtectionService {
     updateCount = 0
     theftEpisodeId &+= 1
     bleAutoDisarmArmed = false
+    suppressedLidClose = false
     Logger.theft.warning("THEFT MODE ACTIVATED - \(trigger.description)")
     ActivityLog.logAsync(.theft, "THEFT MODE ACTIVATED - \(trigger.description)")
     // Stop motion monitoring while in theft mode (the main-app gate would
@@ -646,11 +643,19 @@ final class TheftProtectionService {
 extension TheftProtectionService: LidMonitorDelegate {
   func lidMonitorDidDetectClose(_ monitor: LidMonitorService) {
     guard SettingsService.shared.triggerLidClose else { return }
+    if SettingsService.shared.suppressLidTriggerWhenExternalDisplay,
+       DisplayTopology.hasExternalDisplay() {
+      suppressedLidClose = true
+      ActivityLog.logAsync(.trigger, "Lid closed ignored (external display attached)")
+      return
+    }
+    suppressedLidClose = false
     ActivityLog.logAsync(.trigger, "Lid closed detected")
     activateTheftMode(trigger: .lidClosed)
   }
 
   func lidMonitorDidDetectOpen(_ monitor: LidMonitorService) {
+    suppressedLidClose = false
     Logger.theft.info("Lid opened - theft mode still active")
     ActivityLog.logAsync(.trigger, "Lid opened - theft mode still active")
   }
@@ -702,8 +707,16 @@ extension TheftProtectionService: TelegramCommandDelegate {
 extension TheftProtectionService: SleepWakeDelegate {
   func systemWillSleep() {
     ActivityLog.logAsync(.power, "System will sleep")
-    // Check lid FIRST — if entering theft mode, services should stay active
-    if (state == .enabled || state == .enabledBluetooth) && SettingsService.shared.triggerLidClose && lidMonitor.isClosed {
+    // Check lid FIRST — if entering theft mode, services should stay active.
+    // Suppress if the lid-close that caused sleep was itself suppressed by
+    // external-display presence (undocking at a dock).
+    let suppressClamshellSleep = suppressedLidClose
+      || (SettingsService.shared.suppressLidTriggerWhenExternalDisplay
+          && DisplayTopology.hasExternalDisplay())
+    if (state == .enabled || state == .enabledBluetooth)
+        && SettingsService.shared.triggerLidClose
+        && lidMonitor.isClosed
+        && !suppressClamshellSleep {
       activateTheftMode(trigger: .lidClosed)
     }
     // Only pause services if NOT in theft mode
@@ -717,7 +730,10 @@ extension TheftProtectionService: SleepWakeDelegate {
     ActivityLog.logAsync(.power, "System did wake")
     // On any wake (including DarkWake), check lid for theft trigger
     if state == .enabled || state == .enabledBluetooth {
-      if SettingsService.shared.triggerLidClose && lidMonitor.isClosed {
+      let suppress = suppressedLidClose
+        || (SettingsService.shared.suppressLidTriggerWhenExternalDisplay
+            && DisplayTopology.hasExternalDisplay())
+      if SettingsService.shared.triggerLidClose && lidMonitor.isClosed && !suppress {
         activateTheftMode(trigger: .lidClosed)
         // Resume command polling even in DarkWake so user can remotely /stop
         commandService.resume()
@@ -740,58 +756,5 @@ extension TheftProtectionService: SleepWakeDelegate {
 
   func shouldDenySleep() -> Bool {
     return state == .theftMode
-  }
-}
-
-// MARK: - PowerMonitorDelegate
-extension TheftProtectionService: PowerMonitorDelegate {
-  func powerMonitorDidDetectDisconnect(_ monitor: PowerMonitorService) {
-    guard state == .enabled || state == .enabledBluetooth else { return }
-    guard SettingsService.shared.triggerPowerDisconnect else { return }
-    ActivityLog.logAsync(.trigger, "Power disconnected detected")
-    activateTheftMode(trigger: .powerDisconnected)
-  }
-}
-
-// MARK: - GlobalShortcutDelegate
-extension TheftProtectionService: GlobalShortcutDelegate {
-  func globalShortcutTriggered() {
-    delegate?.theftProtectionShortcutTriggered(self)
-  }
-
-  func bluetoothShortcutTriggered() {
-    delegate?.theftProtectionBluetoothShortcutTriggered(self)
-  }
-}
-
-// MARK: - BluetoothProximityDelegate
-extension TheftProtectionService: BluetoothProximityDelegate {
-  func bluetoothProximityAllDevicesLost(_ service: BluetoothProximityService) {
-    guard SettingsService.shared.bluetoothAutoArmEnabled else { return }
-    guard state == .disabled else { return }
-
-    // Suppress auto-arm for 5 min after manual disarm
-    if let lastDisarm = lastManualDisarmTime,
-       Date().timeIntervalSince(lastDisarm) < 300 {
-      Logger.bluetooth.info("Skipping auto-arm — manual disarm cooldown active")
-      ActivityLog.logAsync(.bluetooth, "Auto-arm suppressed (manual disarm cooldown)")
-      return
-    }
-
-    enableProtectionBluetooth()
-  }
-
-  func bluetoothProximityDeviceReturned(_ service: BluetoothProximityService, device: TrustedBLEDevice) {
-    guard SettingsService.shared.bluetoothAutoArmEnabled else { return }
-    guard state == .enabledBluetooth else { return }
-    // Consent revoked on theft → require manual re-arm cycle before honoring.
-    guard bleAutoDisarmArmed else {
-      Logger.bluetooth.info("Skipping auto-disarm — consent revoked by prior theft episode")
-      return
-    }
-
-    Logger.bluetooth.info("Auto-disarming — device returned: \(device.name)")
-    ActivityLog.logAsync(.bluetooth, "Auto-disarming — \(device.name) returned")
-    disableProtection()
   }
 }

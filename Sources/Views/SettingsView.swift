@@ -38,6 +38,7 @@ struct SettingsView: View {
 
   // Triggers
   @State private var triggerLidClose: Bool = true
+  @State private var suppressLidTriggerWhenExternalDisplay: Bool = true
   @State private var triggerPowerDisconnect: Bool = true
   @State private var triggerPowerButton: Bool = false
   @State private var triggerMotionDetect: Bool = false
@@ -340,6 +341,7 @@ struct SettingsView: View {
   private var triggersTab: some View {
     TriggersTabView(
       triggerLidClose: $triggerLidClose,
+      suppressLidTriggerWhenExternalDisplay: $suppressLidTriggerWhenExternalDisplay,
       triggerPowerDisconnect: $triggerPowerDisconnect,
       triggerPowerButton: $triggerPowerButton,
       triggerMotionDetect: $triggerMotionDetect,
@@ -458,6 +460,7 @@ struct SettingsView: View {
     behaviorAutoAlarm = settings.behaviorAutoAlarm
     alarmVolume = Double(settings.alarmVolume)
     triggerLidClose = settings.triggerLidClose
+    suppressLidTriggerWhenExternalDisplay = settings.suppressLidTriggerWhenExternalDisplay
     triggerPowerDisconnect = settings.triggerPowerDisconnect
     triggerPowerButton = settings.triggerPowerButton
     triggerMotionDetect = settings.triggerMotionDetect
@@ -500,6 +503,7 @@ struct SettingsView: View {
     settings.behaviorAutoAlarm = behaviorAutoAlarm
     settings.alarmVolume = Int(alarmVolume)
     settings.triggerLidClose = triggerLidClose
+    settings.suppressLidTriggerWhenExternalDisplay = suppressLidTriggerWhenExternalDisplay
     settings.triggerPowerDisconnect = triggerPowerDisconnect
     settings.triggerPowerButton = triggerPowerButton
     settings.triggerMotionDetect = triggerMotionDetect

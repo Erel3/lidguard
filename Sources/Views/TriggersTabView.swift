@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TriggersTabView: View {
   @Binding var triggerLidClose: Bool
+  @Binding var suppressLidTriggerWhenExternalDisplay: Bool
   @Binding var triggerPowerDisconnect: Bool
   @Binding var triggerPowerButton: Bool
   @Binding var triggerMotionDetect: Bool
@@ -16,6 +17,9 @@ struct TriggersTabView: View {
     Form {
       Section {
         Toggle("Lid close detection", isOn: $triggerLidClose)
+        Toggle("Ignore lid close when external display is attached",
+               isOn: $suppressLidTriggerWhenExternalDisplay)
+          .disabled(!triggerLidClose)
         Toggle("Power disconnect detection", isOn: $triggerPowerDisconnect)
         helperToggle("Power button detection", isOn: $triggerPowerButton)
           .onChange(of: triggerPowerButton) { _, newValue in

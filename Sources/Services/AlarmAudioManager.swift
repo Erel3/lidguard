@@ -11,7 +11,8 @@ final class AlarmAudioManager {
   private var sourceNode: AVAudioSourceNode?
   private(set) var isPlaying = false
   private var savedSystemVolume: Float?
-  private let lock = NSLock()
+  private var previewActive = false
+  private var previewGeneration: Int = 0
   private static let savedVolumeKey = "AlarmAudioManager.savedSystemVolume"
 
   private var monitoredDeviceID: AudioObjectID = 0
@@ -22,9 +23,6 @@ final class AlarmAudioManager {
   }
 
   func play() {
-    lock.lock()
-    defer { lock.unlock() }
-
     guard !isPlaying else { return }
     isPlaying = true
 
@@ -44,9 +42,6 @@ final class AlarmAudioManager {
   }
 
   func stop() {
-    lock.lock()
-    defer { lock.unlock() }
-
     guard isPlaying else { return }
     isPlaying = false
     stopVolumeMonitoring()
@@ -68,14 +63,18 @@ final class AlarmAudioManager {
   }
 
   func previewSiren() {
-    lock.lock()
-    guard audioEngine == nil else { lock.unlock(); return }
+    guard !previewActive, audioEngine == nil else { return }
+    guard let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1) else {
+      Logger.system.error("previewSiren: AVAudioFormat init failed")
+      return
+    }
+    previewActive = true
+    previewGeneration &+= 1
+    let gen = previewGeneration
 
     let engine = AVAudioEngine()
-    let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
     var phase: Double = 0
     var time: Double = 0
-
     var phase2: Double = 0
 
     let source = AVAudioSourceNode { _, _, frameCount, bufferList -> OSStatus in
@@ -110,18 +109,16 @@ final class AlarmAudioManager {
       self.audioEngine = engine
       self.sourceNode = source
     } catch {
-      lock.unlock()
+      previewActive = false
       return
     }
-    lock.unlock()
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-      guard let self = self else { return }
-      self.lock.lock()
+      guard let self = self, gen == self.previewGeneration else { return }
       self.audioEngine?.stop()
       self.audioEngine = nil
       self.sourceNode = nil
-      self.lock.unlock()
+      self.previewActive = false
     }
   }
 
@@ -133,12 +130,18 @@ final class AlarmAudioManager {
     let highFreq: Double = 1400
     let sweepPeriod: Double = 0.7
 
+    guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
+      Logger.system.error("playSiren: AVAudioFormat init failed — aborting siren")
+      ActivityLog.logAsync(.system, "Alarm failed: audio format init")
+      revertSystemVolume()
+      return
+    }
+
     var phase: Double = 0
     var phase2: Double = 0
     var time: Double = 0
 
     let engine = AVAudioEngine()
-    let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
 
     let source = AVAudioSourceNode { _, _, frameCount, bufferList -> OSStatus in
       let buffer = UnsafeMutableAudioBufferListPointer(bufferList)
@@ -146,16 +149,13 @@ final class AlarmAudioManager {
         let sweep = (1.0 + sin(2.0 * .pi * time / sweepPeriod)) / 2.0
         let freq = lowFreq + (highFreq - lowFreq) * sweep
 
-        // Primary tone with odd harmonics for harsh timbre
         let fundamental = sin(phase)
         let harmonic3 = sin(phase * 3.0) * 0.3
         let harmonic5 = sin(phase * 5.0) * 0.15
         let raw = fundamental + harmonic3 + harmonic5
 
-        // Soft clipping for aggressive edge
         let clipped = tanh(raw * 1.5)
 
-        // Secondary detuned oscillator for beating/width
         let detune = sin(phase2) * 0.25
         let sample = Float(clipped + detune) * 0.7
 
@@ -258,7 +258,7 @@ final class AlarmAudioManager {
     Logger.system.info("Restored system volume to \(String(format: "%.0f%%", volume * 100)) after previous session")
   }
 
-  /// Reverts system volume on playback failure. Called from within play() while lock is held.
+  /// Reverts system volume on playback failure.
   private func revertSystemVolume() {
     isPlaying = false
     stopVolumeMonitoring()
@@ -286,11 +286,15 @@ final class AlarmAudioManager {
 
     monitoredDeviceID = deviceID
 
+    // Listener block fires on .main DispatchQueue, which is NOT the @MainActor isolation domain
+    // under Swift 6 — hop via DispatchQueue.main.async before MainActor.assumeIsolated.
     let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-      MainActor.assumeIsolated {
-        guard let self, self.isPlaying else { return }
-        if let current = self.getSystemVolume(), current < 1.0 {
-          self.setSystemVolume(1.0)
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          guard let self, self.isPlaying else { return }
+          if let current = self.getSystemVolume(), current < 1.0 {
+            self.setSystemVolume(1.0)
+          }
         }
       }
     }

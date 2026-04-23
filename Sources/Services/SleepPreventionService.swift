@@ -1,5 +1,6 @@
 import Foundation
 import IOKit.pwr_mgt
+import os.log
 
 @MainActor
 protocol SleepPrevention {
@@ -12,39 +13,46 @@ protocol SleepPrevention {
 final class SleepPreventionService: SleepPrevention {
   private var idleSleepAssertionID: IOPMAssertionID = 0
   private var systemSleepAssertionID: IOPMAssertionID = 0
-  private(set) var isEnabled = false
+  private var idleHeld = false
+  private var systemHeld = false
+  var isEnabled: Bool { idleHeld || systemHeld }
 
   func enable() {
     guard !isEnabled else { return }
 
     let reason = "LidGuard theft protection active" as CFString
 
-    // Prevent idle sleep
-    IOPMAssertionCreateWithName(
+    let idleResult = IOPMAssertionCreateWithName(
       kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
       IOPMAssertionLevel(kIOPMAssertionLevelOn),
       reason,
       &idleSleepAssertionID
     )
+    idleHeld = (idleResult == kIOReturnSuccess)
 
-    // Prevent system sleep (more aggressive, includes lid close)
-    let result = IOPMAssertionCreateWithName(
+    let systemResult = IOPMAssertionCreateWithName(
       kIOPMAssertionTypePreventSystemSleep as CFString,
       IOPMAssertionLevel(kIOPMAssertionLevelOn),
       reason,
       &systemSleepAssertionID
     )
+    systemHeld = (systemResult == kIOReturnSuccess)
 
-    isEnabled = (result == kIOReturnSuccess)
-    print("[SleepPreventionService] \(isEnabled ? "Enabled" : "Failed to enable")")
+    Logger.power.info("SleepPrevention enabled (idle=\(self.idleHeld) system=\(self.systemHeld))")
   }
 
   func disable() {
-    guard isEnabled else { return }
-
-    IOPMAssertionRelease(idleSleepAssertionID)
-    IOPMAssertionRelease(systemSleepAssertionID)
-    isEnabled = false
-    print("[SleepPreventionService] Disabled")
+    // Release each independently — do not leak one when the other failed to create.
+    if idleHeld {
+      IOPMAssertionRelease(idleSleepAssertionID)
+      idleHeld = false
+      idleSleepAssertionID = 0
+    }
+    if systemHeld {
+      IOPMAssertionRelease(systemSleepAssertionID)
+      systemHeld = false
+      systemSleepAssertionID = 0
+    }
+    Logger.power.info("SleepPrevention disabled")
   }
 }

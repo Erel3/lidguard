@@ -66,17 +66,20 @@ final class SleepWakeService {
   }
 
   fileprivate func handlePower(_ type: UInt32, _ argBits: Int) {
+    // Never skip the ack on sleep-decision messages — a missing
+    // IOAllowPowerChange / IOCancelPowerChange hangs the system for 30s.
     switch type {
     case kIOMessageSystemWillSleep:
       Logger.power.info("System will sleep")
       delegate?.systemWillSleep()
-      IOAllowPowerChange(rootPort, argBits)
+      if rootPort != 0 { IOAllowPowerChange(rootPort, argBits) }
 
     case kIOMessageSystemHasPoweredOn:
       Logger.power.info("System did wake")
       delegate?.systemDidWake()
 
     case kIOMessageCanSystemSleep:
+      guard rootPort != 0 else { return }
       if delegate?.shouldDenySleep() == true {
         IOCancelPowerChange(rootPort, argBits)
       } else {

@@ -13,8 +13,15 @@ final class PowerMonitorService {
 
   private var runLoopSource: CFRunLoopSource?
   private var wasCharging: Bool?
+  private var hasBattery = true
 
   func start() {
+    // Initialize state BEFORE adding the runloop source. If the source
+    // fires synchronously during CFRunLoopAddSource, a nil `wasCharging`
+    // would drop a legitimate disconnect on the first tick.
+    let charging = isCharging()
+    wasCharging = charging
+
     let context = Unmanaged.passUnretained(self).toOpaque()
     runLoopSource = IOPSNotificationCreateRunLoopSource({ ctx in
       guard let ctx = ctx else { return }
@@ -29,9 +36,10 @@ final class PowerMonitorService {
     }
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
 
-    // Initialize state
-    wasCharging = isCharging()
-    Logger.power.info("Started (charging: \(self.wasCharging == true))")
+    if !hasBattery {
+      Logger.power.info("No battery detected — power-disconnect trigger inactive")
+    }
+    Logger.power.info("Started (charging: \(charging))")
   }
 
   func stop() {
@@ -56,11 +64,17 @@ final class PowerMonitorService {
 
   func isCharging() -> Bool {
     guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-          let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [Any],
-          let source = sources.first,
+          let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [Any]
+    else { return false }
+
+    guard let source = sources.first,
           let info = IOPSGetPowerSourceDescription(snapshot, source as CFTypeRef)?
             .takeUnretainedValue() as? [String: Any]
-    else { return false }
+    else {
+      // No internal battery (Mac Studio, Mac Pro, Mac mini) — always on AC.
+      hasBattery = false
+      return true
+    }
 
     return info[kIOPSPowerSourceStateKey] as? String == kIOPSACPowerValue
   }

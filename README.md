@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Erel3/lidguard/releases/latest"><img src="https://img.shields.io/github/v/release/Erel3/lidguard?style=flat-square&color=blue" alt="Release"></a>
   <img src="https://img.shields.io/badge/platform-macOS_14%2B-black?style=flat-square" alt="Platform">
-  <img src="https://img.shields.io/badge/swift-5.9-orange?style=flat-square" alt="Swift">
+  <img src="https://img.shields.io/badge/swift-6.2-orange?style=flat-square" alt="Swift">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Erel3/lidguard?style=flat-square" alt="License"></a>
 </p>
 
@@ -28,11 +28,12 @@
  Disabled ──arm──▶ Enabled ──trigger──▶ Theft Mode
     ◀──disarm───    ◀──authenticate───
                                           ├─ 📍 Location
-    arm: menu, shortcut                   ├─ 📶 WiFi & IP
-    trigger: lid close, power disconnect  ├─ 🔋 Battery
-    authenticate: Touch ID, Telegram      ├─ 🔔 Telegram alerts
-    disarm: Touch ID                      ├─ 🚨 Siren alarm
-                                          └─ 🔒 Lock screen overlay
+    arm: menu, shortcut, BT auto-arm      ├─ 📶 WiFi & IP
+    trigger: lid close, power disconnect, ├─ 🔋 Battery
+             motion (pickup/carry),       ├─ 🔔 Telegram alerts
+             power button                 ├─ 🚨 Siren alarm
+    authenticate: Touch ID, Telegram      └─ 🔒 Lock screen overlay
+    disarm: Touch ID
 ```
 
 When theft mode activates, LidGuard sends **tracking updates every 20 seconds** with location, IP, WiFi, and battery status — all controllable remotely via Telegram.
@@ -40,13 +41,15 @@ When theft mode activates, LidGuard sends **tracking updates every 20 seconds** 
 ## Features
 
 🛡️ **Theft Detection** — lid close, power disconnect, power button press\
+🤚 **Motion Detection** — pickup, tilt, and walking via Apple Silicon accelerometer (helper required)\
+📡 **Bluetooth Auto-Arm** — arms when trusted devices (phone, watch) leave range, disarms when they return\
 📍 **Device Tracking** — location, IP, WiFi, battery every 20s\
 📲 **Telegram Alerts** — instant notifications with full device info\
 🎮 **Remote Control** — enable, disable, alarm, status via Telegram bot\
 🚨 **Alarm** — synthesized siren or system sounds at max volume (enforced, can't be silenced)\
 😴 **Sleep Prevention** — IOKit assertions + `pmset disablesleep`\
 🔒 **Lock Screen** — fullscreen "STOLEN DEVICE" overlay with owner contact info\
-⌨️ **Global Shortcut** — system-wide hotkey to arm/disarm\
+⌨️ **Global Shortcuts** — system-wide hotkeys for protection toggle and Bluetooth auto-arm toggle\
 🔐 **Touch ID** — biometric auth for settings, disable, and quit\
 🛑 **Shutdown Blocking** — prevents force quit and shutdown during theft mode\
 🔄 **Auto-Update** — checks for new versions and installs with one click\
@@ -87,13 +90,14 @@ LidGuard uses a Telegram bot to send alerts and receive remote commands.
 
 ### Settings
 
-Settings are organized into four tabs:
+Settings are organized into five tabs:
 
 | Tab | What's there |
 |:----|:-------------|
 | **General** | Contact name & phone (shown on lock screen overlay), launch at login, auto-update, reset |
-| **Triggers** | Lid close, power disconnect, power button toggles; global shortcut config |
+| **Triggers** | Lid close, power disconnect, power button, motion detection toggles; global shortcut for protection toggle |
 | **Protection** | Sleep prevention, shutdown blocking, lock screen, alarm sound & volume, auto-alarm |
+| **Bluetooth** | Trusted device picker, auto-arm toggle, lock-on-arm option, dedicated global shortcut |
 | **Notifications** | Telegram bot token & chat ID, alert and tracking toggles |
 
 > Credentials are stored in macOS Keychain — never synced or uploaded.
@@ -130,8 +134,10 @@ Hold **Option** while the menu is open to reveal hidden items (test alert, activ
 
 | Permission | Why |
 |:-----------|:----|
-| **Accessibility** | Global keyboard shortcut + power button monitoring |
+| **Input Monitoring** | Global keyboard shortcuts (protection + Bluetooth toggles) |
+| **Accessibility** | Power button monitoring (via helper) |
 | **Location Services** | Device tracking in theft mode |
+| **Bluetooth** | Trusted-device proximity for auto-arm |
 | **Contacts** *(optional)* | Auto-fill owner phone number from your Me card |
 
 The app is **not sandboxed** — it needs direct access to IOKit, CoreAudio, and `pmset` for full theft protection.

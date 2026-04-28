@@ -56,9 +56,12 @@ enum Config {
 
   enum App {
     static let bundleIdentifier = "com.akim.lidguard"
+    static let teamID = "73R36N2A46"
     static let name = "LidGuard"
     static let version: String = {
       Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }()
+    static let designatedRequirement =
+      "anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\" and identifier \"\(bundleIdentifier)\""
   }
 }

@@ -267,7 +267,7 @@ final class UpdateService {
 
   nonisolated private static func downloadFile(from url: URL, to destination: URL) throws {
     let semaphore = DispatchSemaphore(value: 0)
-    var downloadError: Error?
+    nonisolated(unsafe) var downloadError: Error?
 
     URLSession.shared.downloadTask(with: url) { localURL, _, error in
       defer { semaphore.signal() }
@@ -314,7 +314,11 @@ final class UpdateService {
 
     let codesign = Process()
     codesign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-    codesign.arguments = ["--verify", "--deep", "--strict", newAppURL.path]
+    codesign.arguments = [
+      "--verify", "--deep", "--strict",
+      "-R=\(Config.App.designatedRequirement)",
+      newAppURL.path
+    ]
     try codesign.run()
     codesign.waitUntilExit()
     guard codesign.terminationStatus == 0 else {

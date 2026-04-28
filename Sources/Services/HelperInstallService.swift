@@ -332,7 +332,7 @@ final class HelperInstallService {
     }
 
     guard let release = try? JSONDecoder().decode(GitHubReleaseInfo.self, from: data),
-          let asset = release.assets.first(where: { $0.name.hasSuffix(".pkg") }),
+          let asset = release.assets.first(where: { Self.isValidHelperAssetName($0.name) }),
           let downloadURL = URL(string: asset.browserDownloadURL) else {
       Logger.daemon.error("No suitable asset found in helper release")
       ActivityLog.logAsync(.system, "Helper auto-install failed: no suitable asset")
@@ -347,17 +347,23 @@ final class HelperInstallService {
 
       let pkgPath = tempDir.appendingPathComponent(asset.name)
       try downloadFile(from: downloadURL, to: pkgPath)
+      try verifyPkgSignature(at: pkgPath)
 
       // Unload existing daemon and wait for cleanup
       unloadDaemon()
       Thread.sleep(forTimeInterval: 1)
 
-      let escapedPath = pkgPath.path.replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "\"", with: "\\\"")
-      let script = "do shell script \"/usr/sbin/installer -pkg \\\"\(escapedPath)\\\" -target /\" with administrator privileges"
+      // Path passed as argv[1] — never interpolated into the shell command body.
+      // `quoted form of` produces shell-safe single-quoted form, blocking $(),
+      // backticks, and variable expansion.
+      let script = """
+      on run argv
+        do shell script "/usr/sbin/installer -pkg " & quoted form of (item 1 of argv) & " -target /" with administrator privileges
+      end run
+      """
       let installer = Process()
       installer.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-      installer.arguments = ["-e", script]
+      installer.arguments = ["-e", script, pkgPath.path]
       installer.standardOutput = FileHandle.nullDevice
       installer.standardError = FileHandle.nullDevice
       try installer.run()
@@ -378,9 +384,42 @@ final class HelperInstallService {
     }
   }
 
+  /// Allowlist for helper PKG asset filenames published on GitHub Releases.
+  /// Format: `lidguard-helper-MAJOR[.MINOR[.PATCH]].pkg` — must match the
+  /// pattern produced by lidguard-helper/justfile `_pkg` target.
+  /// Blocks shell-metacharacter filenames before any filesystem/exec use.
+  nonisolated static func isValidHelperAssetName(_ name: String) -> Bool {
+    let pattern = #"^lidguard-helper-[0-9]+(\.[0-9]+){0,2}\.pkg$"#
+    return name.range(of: pattern, options: .regularExpression) != nil
+  }
+
+  /// Verify a downloaded PKG was signed with our Developer ID Installer cert.
+  /// Mirrors AuthManager's team-ID pin in the helper daemon: defense against
+  /// a release-channel compromise serving a PKG signed under a different cert.
+  nonisolated private static func verifyPkgSignature(at path: URL) throws {
+    let pkgutil = Process()
+    pkgutil.executableURL = URL(fileURLWithPath: "/usr/sbin/pkgutil")
+    pkgutil.arguments = ["--check-signature", path.path]
+    let pipe = Pipe()
+    pkgutil.standardOutput = pipe
+    pkgutil.standardError = FileHandle.nullDevice
+    try pkgutil.run()
+    pkgutil.waitUntilExit()
+
+    guard pkgutil.terminationStatus == 0 else {
+      throw NSError(domain: "HelperInstall", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "PKG signature invalid"])
+    }
+    let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    guard out.contains("(\(Config.App.teamID))") else {
+      throw NSError(domain: "HelperInstall", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "PKG not signed by expected team ID"])
+    }
+  }
+
   nonisolated private static func downloadFile(from url: URL, to destination: URL) throws {
     let semaphore = DispatchSemaphore(value: 0)
-    var downloadError: Error?
+    nonisolated(unsafe) var downloadError: Error?
 
     URLSession.shared.downloadTask(with: url) { localURL, _, error in
       defer { semaphore.signal() }

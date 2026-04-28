@@ -162,7 +162,7 @@ final class UpdateService {
       version: release.version,
       changelog: changelog,
       onInstall: { [weak self] in
-        self?.installUpdate(release: release)
+        self?.installUpdate(release: release, changelog: changelog)
       },
       onSkip: { [weak self] in
         self?.hasUpdateAvailable = false
@@ -195,7 +195,7 @@ final class UpdateService {
 
   // MARK: - Install
 
-  private func installUpdate(release: GitHubRelease) {
+  private func installUpdate(release: GitHubRelease, changelog: String) {
     guard let asset = release.assets.first(where: { $0.name.hasSuffix(".zip") }),
           let downloadURL = URL(string: asset.browserDownloadURL) else {
       showError("No download found in this release.")
@@ -206,7 +206,7 @@ final class UpdateService {
     if let window = updateWindow {
       let progressView = UpdateView(
         version: release.version,
-        changelog: release.body ?? "",
+        changelog: changelog,
         isInstalling: true,
         onInstall: {},
         onSkip: {},

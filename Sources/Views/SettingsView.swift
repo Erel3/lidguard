@@ -1,5 +1,4 @@
 import Contacts
-import KeyboardShortcuts
 import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
@@ -195,145 +194,24 @@ struct SettingsView: View {
   // MARK: - General Tab
 
   private var generalTab: some View {
-    Form {
-      Section {
-        Toggle("Start at Login", isOn: $startAtLogin)
-          .onChange(of: startAtLogin) { _, newValue in
-            toggleLoginItem(newValue)
-          }
-      } header: {
-        Text("Launch")
-      }
-
-      Section {
-        Toggle("Require Touch ID", isOn: $biometricAuthEnabled)
-      } header: {
-        Text("Security")
-      } footer: {
-        Text("Require Touch ID or password to disable protection, open settings, and quit.")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-      }
-
-      Section {
-        Toggle("Automatically check for updates", isOn: $autoUpdateEnabled)
-        HStack {
-          Spacer()
-          if #available(macOS 26.0, *) {
-            Button(isCheckingForUpdates ? "Checking..." : "Check for Updates") {
-              checkForUpdates()
-            }
-            .buttonStyle(.glass)
-            .disabled(isCheckingForUpdates)
-          } else {
-            Button(isCheckingForUpdates ? "Checking..." : "Check for Updates") {
-              checkForUpdates()
-            }
-            .buttonStyle(.borderless)
-            .disabled(isCheckingForUpdates)
-          }
-          Spacer()
-        }
-      } header: {
-        Text("Updates")
-      }
-
-      Section {
-        HStack {
-          if isInstallingHelper {
-            ProgressView()
-              .controlSize(.small)
-            Text("Installing Helper...")
-          } else if helperInstallResult == true {
-            Image(systemName: "checkmark.circle.fill")
-              .foregroundStyle(.green)
-            Text("Helper Installed Successfully")
-          } else if helperInstallResult == false {
-            Image(systemName: "xmark.circle.fill")
-              .foregroundStyle(.red)
-            Text("Helper Install Failed")
-          } else if helperNeedsUpdate {
-            Image(systemName: "exclamationmark.triangle.fill")
-              .foregroundStyle(.orange)
-            Text("Helper Outdated (v\(daemonVersion ?? "?"), requires v\(Config.Daemon.minHelperVersion))")
-          } else if isDaemonConnected {
-            Image(systemName: "checkmark.circle.fill")
-              .foregroundStyle(.green)
-            Text("Helper Connected (v\(daemonVersion ?? "?"))")
-          } else if helperDisconnectedForUpdate {
-            Image(systemName: "xmark.circle.fill")
-              .foregroundStyle(.orange)
-            Text("Disconnected — helper too old (requires v\(Config.Daemon.minHelperVersion))")
-          } else {
-            Image(systemName: "xmark.circle")
-              .foregroundStyle(.secondary)
-            Text("Helper Not Connected")
-            Text("(requires v\(Config.Daemon.minHelperVersion)+)")
-              .font(.caption).foregroundStyle(.secondary)
-          }
-        }
-        if !isDaemonConnected || helperNeedsUpdate {
-          HStack {
-            Spacer()
-            Button(helperNeedsUpdate || helperDisconnectedForUpdate ? "Update Helper" : "Install Helper") {
-              isInstallingHelper = true
-              helperInstallResult = nil
-              HelperInstallService.shared.autoInstall { success in
-                DispatchQueue.main.async {
-                  isInstallingHelper = false
-                  helperInstallResult = success
-                }
-              }
-            }
-            .font(.callout)
-            .disabled(isInstallingHelper)
-            Spacer()
-          }
-        }
-        if isDaemonConnected && !helperNeedsUpdate && !isInstallingHelper {
-          HStack {
-            Spacer()
-            helperUpdateCheckButton
-            Spacer()
-          }
-        }
-      } header: {
-        Text("Helper Daemon")
-      } footer: {
-        Text("Required for power button detection, lock screen overlay, and pmset sleep prevention.")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-      }
-
-      Section {
-        HStack {
-          Spacer()
-          if #available(macOS 26.0, *) {
-            Button("Reset All Settings", role: .destructive) {
-              showingResetConfirmation = true
-            }
-            .buttonStyle(.glass)
-          } else {
-            Button("Reset All Settings", role: .destructive) {
-              showingResetConfirmation = true
-            }
-            .buttonStyle(.borderless)
-          }
-          Spacer()
-        }
-      }
-
-      Section {
-        HStack {
-          Spacer()
-          Text("\(Config.App.name) v\(Config.App.version)")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-          Spacer()
-        }
-      }
-    }
-    .formStyle(.grouped)
+    GeneralTabView(
+      startAtLogin: $startAtLogin,
+      biometricAuthEnabled: $biometricAuthEnabled,
+      autoUpdateEnabled: $autoUpdateEnabled,
+      showingResetConfirmation: $showingResetConfirmation,
+      isCheckingForUpdates: isCheckingForUpdates,
+      isInstallingHelper: isInstallingHelper,
+      helperInstallResult: helperInstallResult,
+      isDaemonConnected: isDaemonConnected,
+      daemonVersion: daemonVersion,
+      helperNeedsUpdate: helperNeedsUpdate,
+      helperDisconnectedForUpdate: helperDisconnectedForUpdate,
+      isCheckingForHelperUpdates: isCheckingForHelperUpdates,
+      onToggleLoginItem: toggleLoginItem,
+      onCheckForUpdates: checkForUpdates,
+      onInstallHelper: installHelper,
+      onCheckForHelperUpdates: checkForHelperUpdates
+    )
   }
 
   // MARK: - Triggers Tab
@@ -378,52 +256,13 @@ struct SettingsView: View {
   // MARK: - Bluetooth Tab
 
   private var bluetoothTab: some View {
-    Form {
-      Section {
-        Toggle("Enable Bluetooth auto-arm", isOn: $bluetoothAutoArmEnabled)
-        if bluetoothAutoArmEnabled {
-          helperToggle("Lock screen when auto-arming", isOn: $lockScreenOnBluetoothArm)
-        }
-      } header: {
-        Text("Auto-Arm")
-      } footer: {
-        Text("Automatically arms protection when all trusted Bluetooth devices leave range, and disarms when any returns.")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-      }
-
-      Section {
-        KeyboardShortcuts.Recorder("Shortcut", name: .toggleBluetooth)
-      } header: {
-        Text("Global Keyboard Shortcut")
-      } footer: {
-        Text("Press the shortcut anywhere to toggle Bluetooth auto-arm. Requires Input Monitoring permission.")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-      }
-
-      if bluetoothAutoArmEnabled {
-        Section {
-          LabeledContent("Arm delay") {
-            HStack {
-              Slider(value: $bluetoothArmGracePeriod, in: 60...300, step: 10)
-              Text("\(Int(bluetoothArmGracePeriod))s")
-                .monospacedDigit()
-                .frame(width: 40, alignment: .trailing)
-            }
-          }
-        } header: {
-          Text("Arm Delay")
-        }
-
-        Section {
-          BluetoothDevicePickerView(trustedDevices: $trustedBLEDevices)
-        } header: {
-          Text("Devices")
-        }
-      }
-    }
-    .formStyle(.grouped)
+    BluetoothTabView(
+      bluetoothAutoArmEnabled: $bluetoothAutoArmEnabled,
+      bluetoothArmGracePeriod: $bluetoothArmGracePeriod,
+      lockScreenOnBluetoothArm: $lockScreenOnBluetoothArm,
+      trustedBLEDevices: $trustedBLEDevices,
+      isDaemonConnected: isDaemonConnected
+    )
   }
 
   // MARK: - Notifications Tab
@@ -598,15 +437,14 @@ struct SettingsView: View {
     }
   }
 
-  @ViewBuilder
-  private var helperUpdateCheckButton: some View {
-    let title = isCheckingForHelperUpdates ? "Checking..." : "Check for Helper Updates"
-    if #available(macOS 26.0, *) {
-      Button(title) { checkForHelperUpdates() }
-        .buttonStyle(.glass).disabled(isCheckingForHelperUpdates).font(.callout)
-    } else {
-      Button(title) { checkForHelperUpdates() }
-        .buttonStyle(.borderless).disabled(isCheckingForHelperUpdates).font(.callout)
+  private func installHelper() {
+    isInstallingHelper = true
+    helperInstallResult = nil
+    HelperInstallService.shared.autoInstall { success in
+      DispatchQueue.main.async {
+        isInstallingHelper = false
+        helperInstallResult = success
+      }
     }
   }
 
@@ -625,20 +463,6 @@ struct SettingsView: View {
     settings.requestContactsAccess { granted in
       if granted { DispatchQueue.main.async { if let p = contactsPhoneNumber() { self.contactPhone = p } } }
     }
-  }
-
-  private func helperToggle(_ title: String, isOn: Binding<Bool>) -> some View {
-    Toggle(isOn: isOn) {
-      HStack(spacing: 6) {
-        Text(title)
-        if !isDaemonConnected {
-          Text("(requires Helper)")
-            .font(.caption)
-            .foregroundStyle(.orange)
-        }
-      }
-    }
-    .disabled(!isDaemonConnected)
   }
 }
 

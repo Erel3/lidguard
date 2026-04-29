@@ -1,41 +1,29 @@
 import AVFoundation
-import CoreAudio
 import os.log
 
 @MainActor
 final class AlarmAudioManager {
   static let shared = AlarmAudioManager()
 
+  private let audioController = SystemAudioController()
   private var player: AVAudioPlayer?
   private var audioEngine: AVAudioEngine?
   private var sourceNode: AVAudioSourceNode?
   private(set) var isPlaying = false
-  private var savedSystemVolume: Float?
-  private var savedDefaultOutputDevice: AudioObjectID = 0
-  private var didSwitchOutput = false
   private var previewActive = false
   private var previewGeneration: Int = 0
-  private static let savedVolumeKey = "AlarmAudioManager.savedSystemVolume"
-
-  private var monitoredDeviceID: AudioObjectID = 0
-  private var volumeListenerBlock: AudioObjectPropertyListenerBlock?
 
   private init() {
-    restoreSystemVolumeIfNeeded()
+    audioController.restoreSystemVolumeIfNeeded()
   }
 
   func play() {
     guard !isPlaying else { return }
     isPlaying = true
 
-    // Route audio to built-in speakers before raising volume so the siren
-    // is audible in the room even when AirPods/headphones are connected.
-    routeToBuiltInSpeakers()
-
-    savedSystemVolume = getSystemVolume()
-    persistSavedVolume(savedSystemVolume)
-    setSystemVolume(1.0)
-    startVolumeMonitoring()
+    audioController.captureAndMaximize { [weak self] in
+      self?.isPlaying ?? false
+    }
 
     let soundName = SettingsService.shared.alarmSound
     let volume = Float(SettingsService.shared.alarmVolume) / 100.0
@@ -50,7 +38,6 @@ final class AlarmAudioManager {
   func stop() {
     guard isPlaying else { return }
     isPlaying = false
-    stopVolumeMonitoring()
 
     player?.stop()
     player = nil
@@ -58,12 +45,7 @@ final class AlarmAudioManager {
     audioEngine = nil
     sourceNode = nil
 
-    if let saved = savedSystemVolume {
-      setSystemVolume(saved)
-      savedSystemVolume = nil
-      clearPersistedVolume()
-    }
-    restoreDefaultOutputDevice()
+    audioController.restore()
 
     Logger.system.info("Alarm stopped")
     ActivityLog.logAsync(.system, "Alarm stopped")
@@ -71,7 +53,7 @@ final class AlarmAudioManager {
 
   func previewSiren() {
     guard !previewActive, audioEngine == nil else { return }
-    guard let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1) else {
+    guard let format = AVAudioFormat(standardFormatWithSampleRate: SirenSynth.sampleRate, channels: 1) else {
       Logger.system.error("previewSiren: AVAudioFormat init failed")
       return
     }
@@ -80,33 +62,7 @@ final class AlarmAudioManager {
     let gen = previewGeneration
 
     let engine = AVAudioEngine()
-    var phase: Double = 0
-    var time: Double = 0
-    var phase2: Double = 0
-
-    let source = AVAudioSourceNode { _, _, frameCount, bufferList -> OSStatus in
-      let buffer = UnsafeMutableAudioBufferListPointer(bufferList)
-      for frame in 0..<Int(frameCount) {
-        let sweep = (1.0 + sin(2.0 * .pi * time / 0.7)) / 2.0
-        let freq = 500.0 + (1400.0 - 500.0) * sweep
-
-        let fundamental = sin(phase)
-        let harmonic3 = sin(phase * 3.0) * 0.3
-        let harmonic5 = sin(phase * 5.0) * 0.15
-        let raw = fundamental + harmonic3 + harmonic5
-        let clipped = tanh(raw * 1.5)
-        let detune = sin(phase2) * 0.25
-        let sample = Float(clipped + detune) * 0.28
-
-        buffer[0].mData?.assumingMemoryBound(to: Float.self)[frame] = sample
-        phase += 2.0 * .pi * freq / 44100.0
-        phase2 += 2.0 * .pi * (freq * 1.02) / 44100.0
-        if phase > 2.0 * .pi { phase -= 2.0 * .pi }
-        if phase2 > 2.0 * .pi { phase2 -= 2.0 * .pi }
-        time += 1.0 / 44100.0
-      }
-      return noErr
-    }
+    let source = SirenSynth.makeSourceNode(amplitude: 0.28)
 
     engine.attach(source)
     engine.connect(source, to: engine.mainMixerNode, format: format)
@@ -129,52 +85,18 @@ final class AlarmAudioManager {
     }
   }
 
-  // MARK: - Siren (synthesized)
+  // MARK: - Siren
 
   private func playSiren(volume: Float) {
-    let sampleRate: Double = 44100
-    let lowFreq: Double = 500
-    let highFreq: Double = 1400
-    let sweepPeriod: Double = 0.7
-
-    guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
+    guard let format = AVAudioFormat(standardFormatWithSampleRate: SirenSynth.sampleRate, channels: 1) else {
       Logger.system.error("playSiren: AVAudioFormat init failed — aborting siren")
       ActivityLog.logAsync(.system, "Alarm failed: audio format init")
-      revertSystemVolume()
+      revertOnFailure()
       return
     }
 
-    var phase: Double = 0
-    var phase2: Double = 0
-    var time: Double = 0
-
     let engine = AVAudioEngine()
-
-    let source = AVAudioSourceNode { _, _, frameCount, bufferList -> OSStatus in
-      let buffer = UnsafeMutableAudioBufferListPointer(bufferList)
-      for frame in 0..<Int(frameCount) {
-        let sweep = (1.0 + sin(2.0 * .pi * time / sweepPeriod)) / 2.0
-        let freq = lowFreq + (highFreq - lowFreq) * sweep
-
-        let fundamental = sin(phase)
-        let harmonic3 = sin(phase * 3.0) * 0.3
-        let harmonic5 = sin(phase * 5.0) * 0.15
-        let raw = fundamental + harmonic3 + harmonic5
-
-        let clipped = tanh(raw * 1.5)
-
-        let detune = sin(phase2) * 0.25
-        let sample = Float(clipped + detune) * 0.7
-
-        buffer[0].mData?.assumingMemoryBound(to: Float.self)[frame] = sample
-        phase += 2.0 * .pi * freq / sampleRate
-        phase2 += 2.0 * .pi * (freq * 1.02) / sampleRate
-        if phase > 2.0 * .pi { phase -= 2.0 * .pi }
-        if phase2 > 2.0 * .pi { phase2 -= 2.0 * .pi }
-        time += 1.0 / sampleRate
-      }
-      return noErr
-    }
+    let source = SirenSynth.makeSourceNode(amplitude: 0.7)
 
     engine.attach(source)
     engine.connect(source, to: engine.mainMixerNode, format: format)
@@ -188,255 +110,8 @@ final class AlarmAudioManager {
       ActivityLog.logAsync(.system, "Alarm started: Siren")
     } catch {
       Logger.system.error("Failed to start siren: \(error.localizedDescription)")
-      revertSystemVolume()
+      revertOnFailure()
     }
-  }
-
-  // MARK: - System Volume
-
-  private func getSystemVolume() -> Float? {
-    var deviceID = AudioObjectID(kAudioObjectSystemObject)
-    var size = UInt32(MemoryLayout<AudioObjectID>.size)
-    var address = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-      mScope: kAudioObjectPropertyScopeGlobal,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    let status = AudioObjectGetPropertyData(
-      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
-    )
-    guard status == noErr else {
-      Logger.system.error("Failed to get default output device: OSStatus \(status)")
-      return nil
-    }
-
-    var volume: Float32 = 0
-    size = UInt32(MemoryLayout<Float32>.size)
-    address.mSelector = kAudioHardwareServiceDeviceProperty_VirtualMainVolume
-    address.mScope = kAudioDevicePropertyScopeOutput
-    let volStatus = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &volume)
-    guard volStatus == noErr else {
-      Logger.system.error("Failed to read system volume: OSStatus \(volStatus)")
-      return nil
-    }
-    return volume
-  }
-
-  private func setSystemVolume(_ volume: Float) {
-    var deviceID = AudioObjectID(kAudioObjectSystemObject)
-    var size = UInt32(MemoryLayout<AudioObjectID>.size)
-    var address = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-      mScope: kAudioObjectPropertyScopeGlobal,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    let status = AudioObjectGetPropertyData(
-      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
-    )
-    guard status == noErr else {
-      Logger.system.error("Failed to get default output device for volume set: OSStatus \(status)")
-      return
-    }
-
-    var vol = volume
-    size = UInt32(MemoryLayout<Float32>.size)
-    address.mSelector = kAudioHardwareServiceDeviceProperty_VirtualMainVolume
-    address.mScope = kAudioDevicePropertyScopeOutput
-    let setStatus = AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &vol)
-    if setStatus != noErr {
-      Logger.system.error("Failed to set system volume: OSStatus \(setStatus)")
-    }
-  }
-
-  private func persistSavedVolume(_ volume: Float?) {
-    guard let volume = volume else { return }
-    UserDefaults.standard.set(volume, forKey: Self.savedVolumeKey)
-  }
-
-  private func clearPersistedVolume() {
-    UserDefaults.standard.removeObject(forKey: Self.savedVolumeKey)
-  }
-
-  private func restoreSystemVolumeIfNeeded() {
-    guard UserDefaults.standard.object(forKey: Self.savedVolumeKey) != nil else { return }
-    let volume = UserDefaults.standard.float(forKey: Self.savedVolumeKey)
-    setSystemVolume(volume)
-    clearPersistedVolume()
-    Logger.system.info("Restored system volume to \(String(format: "%.0f%%", volume * 100)) after previous session")
-  }
-
-  /// Reverts system volume on playback failure.
-  private func revertSystemVolume() {
-    isPlaying = false
-    stopVolumeMonitoring()
-    if let saved = savedSystemVolume {
-      setSystemVolume(saved)
-      savedSystemVolume = nil
-      clearPersistedVolume()
-    }
-  }
-
-  // MARK: - Output Device Routing
-
-  /// Looks up the built-in speaker AudioObjectID, remembers the current
-  /// default output, and switches to built-in so the siren isn't routed to
-  /// AirPods / USB DAC / HDMI that the thief might have plugged in.
-  private func routeToBuiltInSpeakers() {
-    guard let builtin = findBuiltInOutputDevice() else { return }
-
-    var currentDefault = AudioObjectID(0)
-    var size = UInt32(MemoryLayout<AudioObjectID>.size)
-    var address = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-      mScope: kAudioObjectPropertyScopeGlobal,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    let getStatus = AudioObjectGetPropertyData(
-      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &currentDefault
-    )
-    guard getStatus == noErr else { return }
-
-    if currentDefault == builtin {
-      return
-    }
-
-    var newDefault = builtin
-    let setStatus = AudioObjectSetPropertyData(
-      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil,
-      UInt32(MemoryLayout<AudioObjectID>.size), &newDefault
-    )
-    if setStatus == noErr {
-      savedDefaultOutputDevice = currentDefault
-      didSwitchOutput = true
-      Logger.system.info("Alarm: routed audio to built-in speakers")
-    } else {
-      Logger.system.error("Alarm: failed to switch to built-in output (OSStatus \(setStatus))")
-    }
-  }
-
-  private func restoreDefaultOutputDevice() {
-    guard didSwitchOutput, savedDefaultOutputDevice != 0 else {
-      savedDefaultOutputDevice = 0
-      didSwitchOutput = false
-      return
-    }
-    var address = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-      mScope: kAudioObjectPropertyScopeGlobal,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    var prev = savedDefaultOutputDevice
-    let setStatus = AudioObjectSetPropertyData(
-      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil,
-      UInt32(MemoryLayout<AudioObjectID>.size), &prev
-    )
-    if setStatus != noErr {
-      Logger.system.error("Alarm: failed to restore prior output (OSStatus \(setStatus))")
-    }
-    savedDefaultOutputDevice = 0
-    didSwitchOutput = false
-  }
-
-  private func findBuiltInOutputDevice() -> AudioObjectID? {
-    var size: UInt32 = 0
-    var address = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwarePropertyDevices,
-      mScope: kAudioObjectPropertyScopeGlobal,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    guard AudioObjectGetPropertyDataSize(
-      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
-    ) == noErr, size > 0 else { return nil }
-
-    let count = Int(size) / MemoryLayout<AudioObjectID>.size
-    var devices = [AudioObjectID](repeating: 0, count: count)
-    guard AudioObjectGetPropertyData(
-      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &devices
-    ) == noErr else { return nil }
-
-    for device in devices where isBuiltInOutputDevice(device) {
-      return device
-    }
-    return nil
-  }
-
-  private func isBuiltInOutputDevice(_ device: AudioObjectID) -> Bool {
-    var transport: UInt32 = 0
-    var size = UInt32(MemoryLayout<UInt32>.size)
-    var tAddr = AudioObjectPropertyAddress(
-      mSelector: kAudioDevicePropertyTransportType,
-      mScope: kAudioObjectPropertyScopeGlobal,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    guard AudioObjectGetPropertyData(device, &tAddr, 0, nil, &size, &transport) == noErr,
-          transport == kAudioDeviceTransportTypeBuiltIn else {
-      return false
-    }
-
-    // Must have output streams to be usable as an output device.
-    var streamsSize: UInt32 = 0
-    var sAddr = AudioObjectPropertyAddress(
-      mSelector: kAudioDevicePropertyStreams,
-      mScope: kAudioDevicePropertyScopeOutput,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    guard AudioObjectGetPropertyDataSize(device, &sAddr, 0, nil, &streamsSize) == noErr else {
-      return false
-    }
-    return streamsSize > 0
-  }
-
-  // MARK: - Volume Enforcement
-
-  /// Registers a CoreAudio listener that snaps volume back to max whenever it changes during alarm playback.
-  private func startVolumeMonitoring() {
-    var deviceID = AudioObjectID(kAudioObjectSystemObject)
-    var size = UInt32(MemoryLayout<AudioObjectID>.size)
-    var address = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-      mScope: kAudioObjectPropertyScopeGlobal,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    guard AudioObjectGetPropertyData(
-      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
-    ) == noErr else { return }
-
-    monitoredDeviceID = deviceID
-
-    // Listener block fires on .main DispatchQueue, which is NOT the @MainActor isolation domain
-    // under Swift 6 — hop via DispatchQueue.main.async before MainActor.assumeIsolated.
-    let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-      DispatchQueue.main.async {
-        MainActor.assumeIsolated {
-          guard let self, self.isPlaying else { return }
-          if let current = self.getSystemVolume(), current < 1.0 {
-            self.setSystemVolume(1.0)
-          }
-        }
-      }
-    }
-    volumeListenerBlock = block
-
-    var volAddress = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
-      mScope: kAudioDevicePropertyScopeOutput,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    AudioObjectAddPropertyListenerBlock(deviceID, &volAddress, .main, block)
-  }
-
-  /// Removes the CoreAudio volume listener.
-  private func stopVolumeMonitoring() {
-    guard monitoredDeviceID != 0, let block = volumeListenerBlock else { return }
-
-    var volAddress = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
-      mScope: kAudioDevicePropertyScopeOutput,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    AudioObjectRemovePropertyListenerBlock(monitoredDeviceID, &volAddress, .main, block)
-    monitoredDeviceID = 0
-    volumeListenerBlock = nil
   }
 
   // MARK: - System Sound
@@ -445,7 +120,7 @@ final class AlarmAudioManager {
     let url = URL(fileURLWithPath: "/System/Library/Sounds/\(soundName).aiff")
     guard FileManager.default.fileExists(atPath: url.path) else {
       Logger.system.error("Alarm sound not found: \(soundName)")
-      revertSystemVolume()
+      revertOnFailure()
       return
     }
 
@@ -458,7 +133,12 @@ final class AlarmAudioManager {
       ActivityLog.logAsync(.system, "Alarm started: \(soundName)")
     } catch {
       Logger.system.error("Failed to play alarm: \(error.localizedDescription)")
-      revertSystemVolume()
+      revertOnFailure()
     }
+  }
+
+  private func revertOnFailure() {
+    isPlaying = false
+    audioController.restore()
   }
 }

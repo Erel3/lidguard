@@ -44,17 +44,11 @@ final class TelegramVerificationService {
 
   private func pollUpdates(botToken: String, code: String, onVerified: @escaping @Sendable (String) -> Void) {
     guard !isPolling else { return }
+
+    let offset = lastUpdateId.map { $0 + 1 }
+    guard let url = TelegramAPI.updatesURL(botToken: botToken, offset: offset) else { return }
+
     isPolling = true
-
-    var urlString = "https://api.telegram.org/bot\(botToken)/getUpdates?timeout=1"
-    if let lastId = lastUpdateId {
-      urlString += "&offset=\(lastId + 1)"
-    }
-
-    guard let url = URL(string: urlString) else {
-      isPolling = false
-      return
-    }
 
     let task = session.dataTask(with: url) { [weak self] data, _, error in
       DispatchQueue.main.async {
@@ -82,26 +76,20 @@ final class TelegramVerificationService {
   }
 
   private func parseUpdates(_ data: Data, botToken: String, code: String, onVerified: @escaping @Sendable (String) -> Void) {
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let ok = json["ok"] as? Bool, ok,
-          let results = json["result"] as? [[String: Any]] else { return }
+    guard let results = TelegramAPI.parseUpdates(data) else { return }
 
     for update in results {
       if let updateId = update["update_id"] as? Int {
         lastUpdateId = updateId
       }
 
-      guard let message = update["message"] as? [String: Any],
-            let chat = message["chat"] as? [String: Any],
-            let chatId = (chat["id"] as? NSNumber)?.int64Value,
-            let text = message["text"] as? String else { continue }
+      guard let (chatId, text) = TelegramAPI.extractMessage(from: update) else { continue }
 
       if text.trimmingCharacters(in: .whitespaces) == code {
-        let chatIdString = String(chatId)
-        Logger.telegram.info("Verification successful, chat ID: \(chatIdString)")
+        Logger.telegram.info("Verification successful, chat ID: \(chatId)")
         stopInternal()
-        sendConnectedMessage(botToken: botToken, chatId: chatIdString)
-        onVerified(chatIdString)
+        sendConnectedMessage(botToken: botToken, chatId: chatId)
+        onVerified(chatId)
         return
       }
     }

@@ -82,20 +82,19 @@ final class TelegramCommandService {
   /// Fetches the most recent update with offset=-1 to set lastUpdateId, so historical
   /// commands (e.g., a /stop from last week) do not fire on cold start.
   private func seedLastUpdateId(completion: @escaping @MainActor () -> Void) {
-    guard let botToken = Config.Telegram.botToken else { completion(); return }
-    let urlString = "https://api.telegram.org/bot\(botToken)/getUpdates?offset=-1&timeout=0"
-    guard let url = URL(string: urlString) else { completion(); return }
+    guard let botToken = Config.Telegram.botToken,
+          let url = TelegramAPI.updatesURL(botToken: botToken, offset: -1, timeout: 0) else {
+      completion()
+      return
+    }
 
     session.dataTask(with: url) { [weak self] data, _, _ in
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
           guard let self else { return }
           if let data,
-             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-             let ok = json["ok"] as? Bool, ok,
-             let results = json["result"] as? [[String: Any]],
-             let lastUpdate = results.last,
-             let updateId = lastUpdate["update_id"] as? Int {
+             let results = TelegramAPI.parseUpdates(data),
+             let updateId = results.last?["update_id"] as? Int {
             self.lastUpdateId = updateId
           }
           completion()
@@ -122,17 +121,10 @@ final class TelegramCommandService {
     guard let botToken = Config.Telegram.botToken,
           let chatId = Config.Telegram.chatId else { return }
 
+    let offset = lastUpdateId.map { $0 + 1 }
+    guard let url = TelegramAPI.updatesURL(botToken: botToken, offset: offset) else { return }
+
     isPolling = true
-
-    var urlString = "https://api.telegram.org/bot\(botToken)/getUpdates?timeout=1"
-    if let lastId = lastUpdateId {
-      urlString += "&offset=\(lastId + 1)"
-    }
-
-    guard let url = URL(string: urlString) else {
-      isPolling = false
-      return
-    }
 
     let task = session.dataTask(with: url) { [weak self] data, _, error in
       DispatchQueue.main.async {
@@ -152,21 +144,15 @@ final class TelegramCommandService {
   }
 
   private func parseUpdates(_ data: Data, chatId: String) {
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let ok = json["ok"] as? Bool, ok,
-          let results = json["result"] as? [[String: Any]] else { return }
+    guard let results = TelegramAPI.parseUpdates(data) else { return }
 
     for update in results {
       if let updateId = update["update_id"] as? Int {
         lastUpdateId = updateId
       }
 
-      // Handle text messages
-      guard let message = update["message"] as? [String: Any],
-            let chat = message["chat"] as? [String: Any],
-            let messageChatId = chat["id"] as? Int,
-            String(messageChatId) == chatId,
-            let text = message["text"] as? String else { continue }
+      guard let (messageChatId, text) = TelegramAPI.extractMessage(from: update),
+            messageChatId == chatId else { continue }
 
       if let command = parseCommand(text) {
         Logger.telegram.info("Received command: \(text)")

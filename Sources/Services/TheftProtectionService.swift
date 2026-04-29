@@ -44,16 +44,16 @@ final class TheftProtectionService {
 
   weak var delegate: TheftProtectionDelegate?
 
-  private let notificationService: NotificationService
+  let notificationService: NotificationService
   private let deviceInfoCollector: DeviceInfoCollecting
-  private let sleepPrevention: SleepPrevention
-  private let lidMonitor: LidMonitorService
-  private let commandService: TelegramCommandService
+  let sleepPrevention: SleepPrevention
+  let lidMonitor: LidMonitorService
+  let commandService: TelegramCommandService
   private let sleepWakeService: SleepWakeService
   private let powerMonitor: PowerMonitorService
   private let daemonClient: DaemonIPC
   private let globalShortcutService = GlobalShortcutService()
-  private let bluetoothProximityService = BluetoothProximityService()
+  let bluetoothProximityService = BluetoothProximityService()
 
   var lastManualDisarmTime: Date?
   var lastArmTime: Date?
@@ -67,7 +67,7 @@ final class TheftProtectionService {
   private var theftEpisodeId = 0
   var bleAutoDisarmArmed = false
   // Blocks clamshell-sleep theft when a lid-close was suppressed by ext display.
-  private var suppressedLidClose = false
+  var suppressedLidClose = false
   private var screenUnlockObserver: NSObjectProtocol?
 
   /// Grace period after arming during which motion triggers are suppressed.
@@ -263,7 +263,7 @@ final class TheftProtectionService {
   /// Re-arm motion monitoring with a fresh baseline. Called after returning
   /// from theft mode — the laptop may have been repositioned while in theft
   /// mode, so the old baseline would cause an immediate re-trigger.
-  private func recalibrateMotion() {
+  func recalibrateMotion() {
     guard SettingsService.shared.triggerMotionDetect && daemonClient.motionSupported else { return }
     daemonClient.disableMotionMonitoring()
     daemonClient.enableMotionMonitoring()
@@ -648,125 +648,5 @@ final class TheftProtectionService {
 
   private func lockScreen() {
     daemonClient.lockScreen()
-  }
-}
-
-// MARK: - LidMonitorDelegate
-extension TheftProtectionService: LidMonitorDelegate {
-  func lidMonitorDidDetectClose(_ monitor: LidMonitorService) {
-    guard SettingsService.shared.triggerLidClose else { return }
-    if SettingsService.shared.suppressLidTriggerWhenExternalDisplay,
-       DisplayTopology.hasExternalDisplay() {
-      suppressedLidClose = true
-      ActivityLog.logAsync(.trigger, "Lid closed ignored (external display attached)")
-      return
-    }
-    suppressedLidClose = false
-    ActivityLog.logAsync(.trigger, "Lid closed detected")
-    activateTheftMode(trigger: .lidClosed)
-  }
-
-  func lidMonitorDidDetectOpen(_ monitor: LidMonitorService) {
-    suppressedLidClose = false
-    Logger.theft.info("Lid opened - theft mode still active")
-    ActivityLog.logAsync(.trigger, "Lid opened - theft mode still active")
-  }
-}
-
-// MARK: - TelegramCommandDelegate
-extension TheftProtectionService: TelegramCommandDelegate {
-  // Telegram commands arrive on `com.lidguard.telegram.commands` (utility
-  // queue, intentional). State mutations must happen on main so
-  // `currentTrigger` and other state are read/written on a single thread.
-  func telegramCommandReceived(_ command: TelegramCommand) {
-    DispatchQueue.main.async { [weak self] in
-      self?.handleTelegramCommand(command)
-    }
-  }
-
-  private func handleTelegramCommand(_ command: TelegramCommand) {
-    switch command {
-    case .stop, .safe:
-      deactivateTheftMode(remote: true)
-    case .status:
-      sendStatus()
-    case .enable:
-      enableProtection(lockScreen: SettingsService.shared.lockScreenOnTelegramEnable)
-    case .disable:
-      disableProtection(remote: true)
-    case .alarm:
-      guard state == .theftMode else { return }
-      guard SettingsService.shared.behaviorAlarm else { return }
-      AlarmAudioManager.shared.play()
-      notificationService.send(
-        message: "🔊 <b>ALARM ACTIVATED</b>",
-        keyboard: .theftModeAlarmOn,
-        completion: nil
-      )
-    case .stopalarm:
-      AlarmAudioManager.shared.stop()
-      let keyboard: TelegramKeyboard = state == .theftMode ? .theftMode : .enabled
-      notificationService.send(
-        message: "🔇 <b>ALARM STOPPED</b>",
-        keyboard: keyboard,
-        completion: nil
-      )
-    }
-  }
-}
-
-// MARK: - SleepWakeDelegate
-extension TheftProtectionService: SleepWakeDelegate {
-  func systemWillSleep() {
-    ActivityLog.logAsync(.power, "System will sleep")
-    // Check lid FIRST — if entering theft mode, services should stay active.
-    // Suppress if the lid-close that caused sleep was itself suppressed by
-    // external-display presence (undocking at a dock).
-    let suppressClamshellSleep = suppressedLidClose
-      || (SettingsService.shared.suppressLidTriggerWhenExternalDisplay
-          && DisplayTopology.hasExternalDisplay())
-    if (state == .enabled || state == .enabledBluetooth)
-        && SettingsService.shared.triggerLidClose
-        && lidMonitor.isClosed
-        && !suppressClamshellSleep {
-      activateTheftMode(trigger: .lidClosed)
-    }
-    // Only pause services if NOT in theft mode
-    if state != .theftMode {
-      bluetoothProximityService.pause()
-      commandService.pause()
-    }
-  }
-
-  func systemDidWake() {
-    ActivityLog.logAsync(.power, "System did wake")
-    // On any wake (including DarkWake), check lid for theft trigger
-    if state == .enabled || state == .enabledBluetooth {
-      let suppress = suppressedLidClose
-        || (SettingsService.shared.suppressLidTriggerWhenExternalDisplay
-            && DisplayTopology.hasExternalDisplay())
-      if SettingsService.shared.triggerLidClose && lidMonitor.isClosed && !suppress {
-        activateTheftMode(trigger: .lidClosed)
-        // Resume command polling even in DarkWake so user can remotely /stop
-        commandService.resume()
-      }
-    }
-    // Only resume services and re-enable assertions on full (user) wake, not DarkWake
-    guard CGDisplayIsAsleep(CGMainDisplayID()) == 0 else { return }
-    if state == .enabled || state == .enabledBluetooth {
-      if SettingsService.shared.behaviorSleepPrevention {
-        sleepPrevention.enable()
-      }
-    }
-    bluetoothProximityService.resume()
-    commandService.resume()
-    // Only rebaseline motion if actually armed — avoids keeping helper alive on disarmed boot/wake.
-    if state == .enabled || state == .enabledBluetooth {
-      recalibrateMotion()
-    }
-  }
-
-  func shouldDenySleep() -> Bool {
-    return state == .theftMode
   }
 }

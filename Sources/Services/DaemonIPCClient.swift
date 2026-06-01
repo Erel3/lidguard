@@ -431,9 +431,8 @@ final class DaemonIPCClient: DaemonIPC, @unchecked Sendable {
   // MARK: - Thread Helpers
 
   private func notifyMainThread(_ block: @escaping @MainActor () -> Void) {
-    CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) {
+    DispatchQueue.main.async {
       MainActor.assumeIsolated { block() }
     }
-    CFRunLoopWakeUp(CFRunLoopGetMain())
   }
 }

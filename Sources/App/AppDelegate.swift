@@ -290,17 +290,20 @@ extension AppDelegate: TheftProtectionDelegate {
   }
 
   func theftProtectionStateDidChange(_ service: TheftProtectionService, state: ProtectionState) {
-    CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { [weak self] in
-      guard let self else { return }
-      if state == .theftMode {
-        self.statusBar.cancelMenuTracking()
-      }
-      self.statusBar.update(state: state, trigger: self.theftProtection.currentTrigger)
-      self.statusBar.updateBluetoothMenuItem()
+    // Defer to the next main-runloop turn so this status-bar / activation-policy
+    // mutation doesn't run inside an in-flight state transition or menu event.
+    DispatchQueue.main.async { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        if state == .theftMode {
+          self.statusBar.cancelMenuTracking()
+        }
+        self.statusBar.update(state: state, trigger: self.theftProtection.currentTrigger)
+        self.statusBar.updateBluetoothMenuItem()
 
-      let policy: NSApplication.ActivationPolicy = (state == .disabled) ? .accessory : .regular
-      NSApp.setActivationPolicy(policy)
+        let policy: NSApplication.ActivationPolicy = (state == .disabled) ? .accessory : .regular
+        NSApp.setActivationPolicy(policy)
+      }
     }
-    CFRunLoopWakeUp(CFRunLoopGetMain())
   }
 }

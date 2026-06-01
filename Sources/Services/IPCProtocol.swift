@@ -1,5 +1,11 @@
 import Foundation
 
+// IPC WIRE CONTRACT — must stay field-compatible with the same file in the
+// helper repo: lidguard-helper/Sources/IPCProtocol.swift. The two are duplicated
+// (not shared via an SPM package) because the app and helper are built and
+// distributed as independent repositories. Keep IPCCommand and IPCMessage
+// byte-compatible across both — a field mismatch fails JSON decoding silently.
+
 // MARK: - Outgoing Commands (App -> Daemon)
 
 struct IPCCommand: Codable, Sendable {

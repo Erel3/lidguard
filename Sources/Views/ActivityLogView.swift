@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ActivityLogView: View {
-  @ObservedObject private var activityLog = ActivityLog.shared
+  @State private var activityLog = ActivityLog.shared
   @State private var searchText = ""
   @State private var selectedCategories: Set<LogCategory> = Set(LogCategory.allCases)
 

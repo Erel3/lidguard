@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import os.log
 
 enum LogCategory: String, CaseIterable, Codable {
@@ -56,14 +57,15 @@ struct LogEntry: Identifiable, Codable {
 }
 
 @MainActor
-final class ActivityLog: ObservableObject {
+@Observable
+final class ActivityLog {
   static let shared = ActivityLog()
 
-  @Published private(set) var entries: [LogEntry] = []
-  private let maxEntries = 500
-  private let saveQueue = DispatchQueue(label: "com.akim.lidguard.activitylog")
-  private var logFileURL: URL?
-  private var saveDebounceTimer: DispatchSourceTimer?
+  private(set) var entries: [LogEntry] = []
+  @ObservationIgnored private let maxEntries = 500
+  @ObservationIgnored private let saveQueue = DispatchQueue(label: "com.akim.lidguard.activitylog")
+  @ObservationIgnored private var logFileURL: URL?
+  @ObservationIgnored private var saveDebounceTimer: DispatchSourceTimer?
   private static let saveDebounceInterval: TimeInterval = 1.5
 
   private init() {

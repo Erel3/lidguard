@@ -47,7 +47,14 @@ enum HelperInstaller {
       }
       semaphore.signal()
     }.resume()
-    semaphore.wait()
+    // Bounded wait: request.timeoutInterval is 30s, so the callback fires within
+    // that window. Without a ceiling, a session that never calls back (e.g.
+    // invalidation) would leak this thread permanently.
+    guard semaphore.wait(timeout: .now() + 35) == .success else {
+      Logger.daemon.error("Helper release fetch timed out")
+      ActivityLog.logAsync(.system, "Helper auto-install failed: release fetch timed out")
+      return false
+    }
 
     guard let data = fetchedData, !fetchError else {
       Logger.daemon.error("Failed to fetch helper release info")

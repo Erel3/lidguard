@@ -21,7 +21,7 @@ struct ProtectionTabView: View {
     Form {
       Section {
         Toggle("Idle sleep prevention", isOn: $behaviorSleepPrevention)
-        helperToggle("Lid-close sleep prevention", isOn: $behaviorLidCloseSleep)
+        HelperToggle("Lid-close sleep prevention", isOn: $behaviorLidCloseSleep, isDaemonConnected: isDaemonConnected)
       } header: {
         Text("Sleep")
       } footer: {
@@ -32,9 +32,9 @@ struct ProtectionTabView: View {
 
       Section {
         Toggle("Shutdown blocking", isOn: $behaviorShutdownBlocking)
-        helperToggle("Lock screen on theft mode", isOn: $lockScreenOnTheftMode)
+        HelperToggle("Lock screen on theft mode", isOn: $lockScreenOnTheftMode, isDaemonConnected: isDaemonConnected)
         if lockScreenOnTheftMode {
-          helperToggle("Lock screen message", isOn: $behaviorLockScreen)
+          HelperToggle("Lock screen message", isOn: $behaviorLockScreen, isDaemonConnected: isDaemonConnected)
             .onChange(of: behaviorLockScreen) { _, newValue in
               if newValue && isDaemonConnected {
                 onLockScreenEnabled?()
@@ -97,19 +97,5 @@ struct ProtectionTabView: View {
       }
     }
     .formStyle(.grouped)
-  }
-
-  private func helperToggle(_ title: String, isOn: Binding<Bool>) -> some View {
-    Toggle(isOn: isOn) {
-      HStack(spacing: 6) {
-        Text(title)
-        if !isDaemonConnected {
-          Text("(requires Helper)")
-            .font(.caption)
-            .foregroundStyle(.orange)
-        }
-      }
-    }
-    .disabled(!isDaemonConnected)
   }
 }

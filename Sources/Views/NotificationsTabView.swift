@@ -40,7 +40,7 @@ struct NotificationsTabView: View {
               }
             }
           }
-          helperToggle("Lock screen on /enable command", isOn: $lockScreenOnTelegramEnable)
+          HelperToggle("Lock screen on /enable command", isOn: $lockScreenOnTelegramEnable, isDaemonConnected: isDaemonConnected)
         }
       } header: {
         Text("Telegram")
@@ -84,19 +84,5 @@ struct NotificationsTabView: View {
       .disabled(!telegramEnabled)
     }
     .formStyle(.grouped)
-  }
-
-  private func helperToggle(_ title: String, isOn: Binding<Bool>) -> some View {
-    Toggle(isOn: isOn) {
-      HStack(spacing: 6) {
-        Text(title)
-        if !isDaemonConnected {
-          Text("(requires Helper)")
-            .font(.caption)
-            .foregroundStyle(.orange)
-        }
-      }
-    }
-    .disabled(!isDaemonConnected)
   }
 }

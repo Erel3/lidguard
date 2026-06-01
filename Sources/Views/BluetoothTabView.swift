@@ -13,7 +13,7 @@ struct BluetoothTabView: View {
       Section {
         Toggle("Enable Bluetooth auto-arm", isOn: $bluetoothAutoArmEnabled)
         if bluetoothAutoArmEnabled {
-          helperToggle("Lock screen when auto-arming", isOn: $lockScreenOnBluetoothArm)
+          HelperToggle("Lock screen when auto-arming", isOn: $lockScreenOnBluetoothArm, isDaemonConnected: isDaemonConnected)
         }
       } header: {
         Text("Auto-Arm")
@@ -55,19 +55,5 @@ struct BluetoothTabView: View {
       }
     }
     .formStyle(.grouped)
-  }
-
-  private func helperToggle(_ title: String, isOn: Binding<Bool>) -> some View {
-    Toggle(isOn: isOn) {
-      HStack(spacing: 6) {
-        Text(title)
-        if !isDaemonConnected {
-          Text("(requires Helper)")
-            .font(.caption)
-            .foregroundStyle(.orange)
-        }
-      }
-    }
-    .disabled(!isDaemonConnected)
   }
 }

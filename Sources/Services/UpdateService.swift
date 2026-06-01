@@ -388,31 +388,3 @@ final class UpdateService {
     alert.runModal()
   }
 }
-
-// MARK: - API Models
-
-private struct GitHubReleaseAsset: Decodable, Sendable {
-  let name: String
-  let browserDownloadURL: String
-
-  enum CodingKeys: String, CodingKey {
-    case name
-    case browserDownloadURL = "browser_download_url"
-  }
-}
-
-private struct GitHubRelease: Decodable, Sendable {
-  let tagName: String
-  let body: String?
-  let assets: [GitHubReleaseAsset]
-
-  var version: String {
-    tagName.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-  }
-
-  enum CodingKeys: String, CodingKey {
-    case tagName = "tag_name"
-    case body
-    case assets
-  }
-}

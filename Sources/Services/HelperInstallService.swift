@@ -103,7 +103,7 @@ final class HelperInstallService {
     settings.lastHelperUpdateCheckDate = Date()
 
     guard !hadError, (200...299).contains(statusCode), let data = data,
-          let release = try? JSONDecoder().decode(GitHubReleaseInfo.self, from: data) else {
+          let release = try? JSONDecoder().decode(GitHubRelease.self, from: data) else {
       if !silent {
         Logger.daemon.error("Failed to check for helper updates")
         showHelperCheckError()

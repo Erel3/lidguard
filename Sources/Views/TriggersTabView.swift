@@ -21,7 +21,7 @@ struct TriggersTabView: View {
                isOn: $suppressLidTriggerWhenExternalDisplay)
           .disabled(!triggerLidClose)
         Toggle("Power disconnect detection", isOn: $triggerPowerDisconnect)
-        helperToggle("Power button detection", isOn: $triggerPowerButton)
+        HelperToggle("Power button detection", isOn: $triggerPowerButton, isDaemonConnected: isDaemonConnected)
           .onChange(of: triggerPowerButton) { _, newValue in
             if newValue && !helperAccessibilityGranted {
               triggerPowerButton = false
@@ -29,7 +29,7 @@ struct TriggersTabView: View {
             }
           }
         if motionSupported {
-          helperToggle("Motion detection", isOn: $triggerMotionDetect)
+          HelperToggle("Motion detection", isOn: $triggerMotionDetect, isDaemonConnected: isDaemonConnected)
         }
       } header: {
         Text("Theft Mode Triggers")
@@ -39,7 +39,7 @@ struct TriggersTabView: View {
 
       Section {
         KeyboardShortcuts.Recorder("Shortcut", name: .toggleProtection)
-        helperToggle("Lock screen when arming", isOn: $lockScreenOnShortcut)
+        HelperToggle("Lock screen when arming", isOn: $lockScreenOnShortcut, isDaemonConnected: isDaemonConnected)
       } header: {
         Text("Global Keyboard Shortcut")
       } footer: {
@@ -76,19 +76,5 @@ struct TriggersTabView: View {
     }
     .font(.footnote)
     .foregroundStyle(.secondary)
-  }
-
-  private func helperToggle(_ title: String, isOn: Binding<Bool>) -> some View {
-    Toggle(isOn: isOn) {
-      HStack(spacing: 6) {
-        Text(title)
-        if !isDaemonConnected {
-          Text("(requires Helper)")
-            .font(.caption)
-            .foregroundStyle(.orange)
-        }
-      }
-    }
-    .disabled(!isDaemonConnected)
   }
 }

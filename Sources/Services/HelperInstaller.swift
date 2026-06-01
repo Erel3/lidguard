@@ -1,26 +1,6 @@
 import Foundation
 import os.log
 
-struct GitHubReleaseInfo: Decodable, Sendable {
-  let tagName: String
-  let assets: [GitHubAsset]
-
-  enum CodingKeys: String, CodingKey {
-    case tagName = "tag_name"
-    case assets
-  }
-}
-
-struct GitHubAsset: Decodable, Sendable {
-  let name: String
-  let browserDownloadURL: String
-
-  enum CodingKeys: String, CodingKey {
-    case name
-    case browserDownloadURL = "browser_download_url"
-  }
-}
-
 enum HelperInstaller {
   static func performAutoInstall() async -> Bool {
     Logger.daemon.info("Auto-installing helper daemon...")
@@ -41,7 +21,7 @@ enum HelperInstaller {
         return false
       }
 
-      guard let release = try? JSONDecoder().decode(GitHubReleaseInfo.self, from: data),
+      guard let release = try? JSONDecoder().decode(GitHubRelease.self, from: data),
             let asset = release.assets.first(where: { isValidHelperAssetName($0.name) }),
             let downloadURL = URL(string: asset.browserDownloadURL) else {
         Logger.daemon.error("No suitable asset found in helper release")

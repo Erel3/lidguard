@@ -11,7 +11,6 @@ final class HelperInstallService {
     case optional   // version >= minHelperVersion but < latest GitHub release
   }
 
-  private let installQueue = DispatchQueue(label: "com.lidguard.helper.install", qos: .utility)
   private let settings = SettingsService.shared
   private var isInstalling = false
   private var updateWindow: NSWindow?
@@ -249,19 +248,16 @@ final class HelperInstallService {
   func autoInstall(completion: (@Sendable (Bool) -> Void)? = nil) {
     guard !isInstalling else { completion?(false); return }
     isInstalling = true
-    installQueue.async { [weak self] in
-      let success = HelperInstaller.performAutoInstall()
-      DispatchQueue.main.async {
-        MainActor.assumeIsolated {
-          self?.isInstalling = false
-          if success {
-            self?.disconnectedForRequiredUpdate = false
-            self?.settings.skippedHelperVersion = nil
-            NotificationCenter.default.post(name: .helperInstallCompleted, object: nil)
-          }
-          completion?(success)
-        }
+    Task { [weak self] in
+      let success = await HelperInstaller.performAutoInstall()
+      // Back on the main actor (the enclosing type is @MainActor).
+      self?.isInstalling = false
+      if success {
+        self?.disconnectedForRequiredUpdate = false
+        self?.settings.skippedHelperVersion = nil
+        NotificationCenter.default.post(name: .helperInstallCompleted, object: nil)
       }
+      completion?(success)
     }
   }
 }

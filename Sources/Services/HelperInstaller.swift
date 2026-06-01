@@ -22,7 +22,7 @@ struct GitHubAsset: Decodable, Sendable {
 }
 
 enum HelperInstaller {
-  static func performAutoInstall() -> Bool {
+  static func performAutoInstall() async -> Bool {
     Logger.daemon.info("Auto-installing helper daemon...")
     ActivityLog.logAsync(.system, "Auto-installing helper daemon...")
 
@@ -33,55 +33,33 @@ enum HelperInstaller {
     request.setValue("LidGuard/\(Config.App.version)", forHTTPHeaderField: "User-Agent")
     request.timeoutInterval = 30
 
-    let semaphore = DispatchSemaphore(value: 0)
-    nonisolated(unsafe) var fetchedData: Data?
-    nonisolated(unsafe) var fetchError: Bool = false
-
-    URLSession.shared.dataTask(with: request) { data, response, error in
-      if error != nil {
-        fetchError = true
-      } else if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-        fetchError = true
-      } else {
-        fetchedData = data
-      }
-      semaphore.signal()
-    }.resume()
-    // Bounded wait: request.timeoutInterval is 30s, so the callback fires within
-    // that window. Without a ceiling, a session that never calls back (e.g.
-    // invalidation) would leak this thread permanently.
-    guard semaphore.wait(timeout: .now() + 35) == .success else {
-      Logger.daemon.error("Helper release fetch timed out")
-      ActivityLog.logAsync(.system, "Helper auto-install failed: release fetch timed out")
-      return false
-    }
-
-    guard let data = fetchedData, !fetchError else {
-      Logger.daemon.error("Failed to fetch helper release info")
-      ActivityLog.logAsync(.system, "Helper auto-install failed: could not fetch release info")
-      return false
-    }
-
-    guard let release = try? JSONDecoder().decode(GitHubReleaseInfo.self, from: data),
-          let asset = release.assets.first(where: { isValidHelperAssetName($0.name) }),
-          let downloadURL = URL(string: asset.browserDownloadURL) else {
-      Logger.daemon.error("No suitable asset found in helper release")
-      ActivityLog.logAsync(.system, "Helper auto-install failed: no suitable asset")
-      return false
-    }
-
     do {
+      let (data, response) = try await URLSession.shared.data(for: request)
+      guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+        Logger.daemon.error("Failed to fetch helper release info")
+        ActivityLog.logAsync(.system, "Helper auto-install failed: could not fetch release info")
+        return false
+      }
+
+      guard let release = try? JSONDecoder().decode(GitHubReleaseInfo.self, from: data),
+            let asset = release.assets.first(where: { isValidHelperAssetName($0.name) }),
+            let downloadURL = URL(string: asset.browserDownloadURL) else {
+        Logger.daemon.error("No suitable asset found in helper release")
+        ActivityLog.logAsync(.system, "Helper auto-install failed: no suitable asset")
+        return false
+      }
+
       let tempDir = FileManager.default.temporaryDirectory
         .appendingPathComponent("lidguard-helper-\(UUID().uuidString)")
       try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
       defer { try? FileManager.default.removeItem(at: tempDir) }
 
       let pkgPath = tempDir.appendingPathComponent(asset.name)
-      try downloadFile(from: downloadURL, to: pkgPath)
-      try verifyPkgSignature(at: pkgPath)
+      try await downloadFile(from: downloadURL, to: pkgPath)
+      try await verifyPkgSignature(at: pkgPath)
 
-      unloadDaemon()
-      Thread.sleep(forTimeInterval: 1)
+      await unloadDaemon()
+      try? await Task.sleep(nanoseconds: 1_000_000_000)
 
       // Path passed as argv[1] — never interpolated into the shell command body.
       // `quoted form of` produces shell-safe single-quoted form, blocking $(),
@@ -96,8 +74,7 @@ enum HelperInstaller {
       installer.arguments = ["-e", script, pkgPath.path]
       installer.standardOutput = FileHandle.nullDevice
       installer.standardError = FileHandle.nullDevice
-      try installer.run()
-      installer.waitUntilExit()
+      try await installer.runToCompletion()
 
       guard installer.terminationStatus == 0 else {
         throw NSError(domain: "HelperInstall", code: 1,
@@ -126,15 +103,14 @@ enum HelperInstaller {
   /// Verify a downloaded PKG was signed with our Developer ID Installer cert.
   /// Mirrors AuthManager's team-ID pin in the helper daemon: defense against
   /// a release-channel compromise serving a PKG signed under a different cert.
-  private static func verifyPkgSignature(at path: URL) throws {
+  private static func verifyPkgSignature(at path: URL) async throws {
     let pkgutil = Process()
     pkgutil.executableURL = URL(fileURLWithPath: "/usr/sbin/pkgutil")
     pkgutil.arguments = ["--check-signature", path.path]
     let pipe = Pipe()
     pkgutil.standardOutput = pipe
     pkgutil.standardError = FileHandle.nullDevice
-    try pkgutil.run()
-    pkgutil.waitUntilExit()
+    try await pkgutil.runToCompletion()
 
     guard pkgutil.terminationStatus == 0 else {
       throw NSError(domain: "HelperInstall", code: 2,
@@ -147,30 +123,16 @@ enum HelperInstaller {
     }
   }
 
-  private static func downloadFile(from url: URL, to destination: URL) throws {
-    let semaphore = DispatchSemaphore(value: 0)
-    nonisolated(unsafe) var downloadError: Error?
-
-    URLSession.shared.downloadTask(with: url) { localURL, _, error in
-      defer { semaphore.signal() }
-      if let error { downloadError = error; return }
-      guard let localURL else { downloadError = URLError(.badServerResponse); return }
-      do {
-        try FileManager.default.moveItem(at: localURL, to: destination)
-      } catch {
-        downloadError = error
-      }
-    }.resume()
-
-    let result = semaphore.wait(timeout: .now() + 120)
-    if result == .timedOut {
+  private static func downloadFile(from url: URL, to destination: URL) async throws {
+    let (localURL, response) = try await URLSession.shared.download(from: url)
+    if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
       throw NSError(domain: "HelperInstall", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Download timed out"])
+                    userInfo: [NSLocalizedDescriptionKey: "Download HTTP error: \(http.statusCode)"])
     }
-    if let error = downloadError { throw error }
+    try FileManager.default.moveItem(at: localURL, to: destination)
   }
 
-  private static func unloadDaemon() {
+  private static func unloadDaemon() async {
     let plistDst = FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent("Library/LaunchAgents/\(Config.Daemon.launchAgentLabel).plist")
     let process = Process()
@@ -178,8 +140,7 @@ enum HelperInstaller {
     process.arguments = ["bootout", "gui/\(getuid())", plistDst.path]
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
-    try? process.run()
-    process.waitUntilExit()
+    try? await process.runToCompletion()
   }
 
   static func isNewer(_ remote: String, than local: String) -> Bool {

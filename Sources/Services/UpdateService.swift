@@ -8,7 +8,6 @@ final class UpdateService {
 
   private let settings = SettingsService.shared
   private let logger = Logger.update
-  private let checkQueue = DispatchQueue(label: "com.lidguard.update", qos: .utility)
   private var periodicTimer: DispatchSourceTimer?
   private var updateWindow: NSWindow?
   private var initialCheckDone = false
@@ -217,89 +216,72 @@ final class UpdateService {
 
     let version = release.version
     let downloadDest = downloadURL
-    checkQueue.async { [weak self] in
-      let tempDir = FileManager.default.temporaryDirectory
-        .appendingPathComponent("lidguard-update-\(UUID().uuidString)")
-
+    Task { [weak self] in
       do {
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        let zipPath = tempDir.appendingPathComponent("LidGuard.zip")
-
-        try Self.downloadFile(from: downloadDest, to: zipPath)
-        let newAppURL = try Self.unzipAndVerify(zipPath: zipPath, in: tempDir)
-
-        let currentAppURL = Bundle.main.bundleURL
-        let staging = tempDir.appendingPathComponent("LidGuard-staged.app")
-        try FileManager.default.moveItem(at: newAppURL, to: staging)
-
-        try FileManager.default.replaceItem(
-          at: currentAppURL,
-          withItemAt: staging,
-          backupItemName: "LidGuard-backup.app",
-          options: .usingNewMetadataOnly,
-          resultingItemURL: nil
-        )
-
-        try? FileManager.default.removeItem(at: tempDir)
+        let currentAppURL = try await Self.performInstall(from: downloadDest)
+        // Back on the main actor (enclosing type is @MainActor).
         ActivityLog.logAsync(.system, "Update to v\(version) installed")
-
-        DispatchQueue.main.async {
-          MainActor.assumeIsolated {
-            guard let self = self else { return }
-            self.hasUpdateAvailable = false
-            self.settings.skippedVersion = nil
-            self.restartApp(at: currentAppURL)
-          }
-        }
+        self?.hasUpdateAvailable = false
+        self?.settings.skippedVersion = nil
+        self?.restartApp(at: currentAppURL)
       } catch {
-        try? FileManager.default.removeItem(at: tempDir)
-        DispatchQueue.main.async {
-          MainActor.assumeIsolated {
-            guard let self = self else { return }
-            self.logger.error("Update failed: \(error.localizedDescription)")
-            self.updateWindow?.close()
-            self.showError("Update failed: \(error.localizedDescription)")
-          }
-        }
+        self?.logger.error("Update failed: \(error.localizedDescription)")
+        self?.updateWindow?.close()
+        self?.showError("Update failed: \(error.localizedDescription)")
       }
     }
   }
 
-  nonisolated private static func downloadFile(from url: URL, to destination: URL) throws {
-    let semaphore = DispatchSemaphore(value: 0)
-    nonisolated(unsafe) var downloadError: Error?
+  /// Downloads, verifies (codesign team-ID pinned), and atomically swaps in the
+  /// new bundle, returning the current bundle URL to relaunch. Runs off the main
+  /// actor and never blocks a thread.
+  nonisolated private static func performInstall(from downloadURL: URL) async throws -> URL {
+    let tempDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("lidguard-update-\(UUID().uuidString)")
+    do {
+      try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+      let zipPath = tempDir.appendingPathComponent("LidGuard.zip")
 
-    URLSession.shared.downloadTask(with: url) { localURL, _, error in
-      defer { semaphore.signal() }
-      if let error = error { downloadError = error; return }
-      guard let localURL = localURL else {
-        downloadError = URLError(.badServerResponse)
-        return
-      }
-      do {
-        try FileManager.default.moveItem(at: localURL, to: destination)
-      } catch {
-        downloadError = error
-      }
-    }.resume()
+      try await downloadFile(from: downloadURL, to: zipPath)
+      let newAppURL = try await unzipAndVerify(zipPath: zipPath, in: tempDir)
 
-    let result = semaphore.wait(timeout: .now() + 300)
-    if result == .timedOut {
+      let currentAppURL = Bundle.main.bundleURL
+      let staging = tempDir.appendingPathComponent("LidGuard-staged.app")
+      try FileManager.default.moveItem(at: newAppURL, to: staging)
+
+      try FileManager.default.replaceItem(
+        at: currentAppURL,
+        withItemAt: staging,
+        backupItemName: "LidGuard-backup.app",
+        options: .usingNewMetadataOnly,
+        resultingItemURL: nil
+      )
+
+      try? FileManager.default.removeItem(at: tempDir)
+      return currentAppURL
+    } catch {
+      try? FileManager.default.removeItem(at: tempDir)
+      throw error
+    }
+  }
+
+  nonisolated private static func downloadFile(from url: URL, to destination: URL) async throws {
+    let (localURL, response) = try await URLSession.shared.download(from: url)
+    if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
       throw NSError(domain: "UpdateService", code: 5,
-                    userInfo: [NSLocalizedDescriptionKey: "Download timed out"])
+                    userInfo: [NSLocalizedDescriptionKey: "Download HTTP error: \(http.statusCode)"])
     }
-    if let error = downloadError { throw error }
+    try FileManager.default.moveItem(at: localURL, to: destination)
   }
 
-  nonisolated private static func unzipAndVerify(zipPath: URL, in tempDir: URL) throws -> URL {
+  nonisolated private static func unzipAndVerify(zipPath: URL, in tempDir: URL) async throws -> URL {
     let unzipDir = tempDir.appendingPathComponent("unzipped")
     try FileManager.default.createDirectory(at: unzipDir, withIntermediateDirectories: true)
 
     let unzip = Process()
     unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
     unzip.arguments = ["-q", zipPath.path, "-d", unzipDir.path]
-    try unzip.run()
-    unzip.waitUntilExit()
+    try await unzip.runToCompletion()
 
     guard unzip.terminationStatus == 0 else {
       throw NSError(domain: "UpdateService", code: 2,
@@ -319,8 +301,7 @@ final class UpdateService {
       "-R=\(Config.App.designatedRequirement)",
       newAppURL.path
     ]
-    try codesign.run()
-    codesign.waitUntilExit()
+    try await codesign.runToCompletion()
     guard codesign.terminationStatus == 0 else {
       throw NSError(domain: "UpdateService", code: 4,
                     userInfo: [NSLocalizedDescriptionKey: "Code signature verification failed"])

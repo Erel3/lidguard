@@ -376,6 +376,7 @@ final class SettingsService {
     defaults.removeObject(forKey: Keys.telegramEnabled)
     defaults.removeObject(forKey: Keys.alarmSound)
     defaults.removeObject(forKey: Keys.triggerLidClose)
+    defaults.removeObject(forKey: Keys.suppressLidTriggerWhenExternalDisplay)
     defaults.removeObject(forKey: Keys.triggerPowerDisconnect)
     defaults.removeObject(forKey: Keys.triggerPowerButton)
     defaults.removeObject(forKey: Keys.triggerMotionDetect)

@@ -19,65 +19,65 @@ final class SettingsService {
   private let defaults = UserDefaults.standard
   private let contactStore = CNContactStore()
 
-  private enum Keys {
-    static let contactName = "lidguard.contactName"
-    static let contactPhone = "lidguard.contactPhone"
-    static let telegramEnabled = "lidguard.telegramEnabled"
-    static let alarmSound = "lidguard.alarmSound"
+  private enum Keys: String, CaseIterable {
+    case contactName = "lidguard.contactName"
+    case contactPhone = "lidguard.contactPhone"
+    case telegramEnabled = "lidguard.telegramEnabled"
+    case alarmSound = "lidguard.alarmSound"
 
     // Triggers
-    static let triggerLidClose = "lidguard.triggerLidClose"
-    static let suppressLidTriggerWhenExternalDisplay = "lidguard.suppressLidTriggerWhenExternalDisplay"
-    static let triggerPowerDisconnect = "lidguard.triggerPowerDisconnect"
-    static let triggerPowerButton = "lidguard.triggerPowerButton"
-    static let triggerMotionDetect = "lidguard.triggerMotionDetect"
+    case triggerLidClose = "lidguard.triggerLidClose"
+    case suppressLidTriggerWhenExternalDisplay = "lidguard.suppressLidTriggerWhenExternalDisplay"
+    case triggerPowerDisconnect = "lidguard.triggerPowerDisconnect"
+    case triggerPowerButton = "lidguard.triggerPowerButton"
+    case triggerMotionDetect = "lidguard.triggerMotionDetect"
 
     // Global Shortcut
-    static let shortcutEnabled = "lidguard.shortcutEnabled"
+    case shortcutEnabled = "lidguard.shortcutEnabled"
 
     // Behaviors
-    static let behaviorSleepPrevention = "lidguard.behaviorSleepPrevention"
-    static let behaviorLidCloseSleep = "lidguard.behaviorLidCloseSleep"
-    static let behaviorShutdownBlocking = "lidguard.behaviorShutdownBlocking"
-    static let behaviorLockScreen = "lidguard.behaviorLockScreen"
-    static let lockScreenOnTheftMode = "lidguard.lockScreenOnTheftMode"
-    static let lockScreenOnShortcut = "lidguard.lockScreenOnShortcut"
-    static let lockScreenOnTelegramEnable = "lidguard.lockScreenOnTelegramEnable"
-    static let lockScreenOnBluetoothArm = "lidguard.lockScreenOnBluetoothArm"
-    static let biometricAuthEnabled = "lidguard.biometricAuthEnabled"
-    static let behaviorAlarm = "lidguard.behaviorAlarm"
-    static let behaviorAutoAlarm = "lidguard.behaviorAutoAlarm"
-    static let alarmVolume = "lidguard.alarmVolume"
-    static let offlineSirenEnabled = "lidguard.offlineSirenEnabled"
+    case behaviorSleepPrevention = "lidguard.behaviorSleepPrevention"
+    case behaviorLidCloseSleep = "lidguard.behaviorLidCloseSleep"
+    case behaviorShutdownBlocking = "lidguard.behaviorShutdownBlocking"
+    case behaviorLockScreen = "lidguard.behaviorLockScreen"
+    case lockScreenOnTheftMode = "lidguard.lockScreenOnTheftMode"
+    case lockScreenOnShortcut = "lidguard.lockScreenOnShortcut"
+    case lockScreenOnTelegramEnable = "lidguard.lockScreenOnTelegramEnable"
+    case lockScreenOnBluetoothArm = "lidguard.lockScreenOnBluetoothArm"
+    case biometricAuthEnabled = "lidguard.biometricAuthEnabled"
+    case behaviorAlarm = "lidguard.behaviorAlarm"
+    case behaviorAutoAlarm = "lidguard.behaviorAutoAlarm"
+    case alarmVolume = "lidguard.alarmVolume"
+    case offlineSirenEnabled = "lidguard.offlineSirenEnabled"
 
     // Updates
-    static let autoUpdateEnabled = "lidguard.autoUpdateEnabled"
-    static let lastUpdateCheckDate = "lidguard.lastUpdateCheckDate"
-    static let skippedVersion = "lidguard.skippedVersion"
-    static let skippedHelperVersion = "lidguard.skippedHelperVersion"
-    static let lastHelperUpdateCheckDate = "lidguard.lastHelperUpdateCheckDate"
+    case autoUpdateEnabled = "lidguard.autoUpdateEnabled"
+    case lastUpdateCheckDate = "lidguard.lastUpdateCheckDate"
+    case skippedVersion = "lidguard.skippedVersion"
+    case skippedHelperVersion = "lidguard.skippedHelperVersion"
+    case lastHelperUpdateCheckDate = "lidguard.lastHelperUpdateCheckDate"
 
     // Setup
-    static let setupComplete = "lidguard.setupComplete"
+    case setupComplete = "lidguard.setupComplete"
 
     // Bluetooth Shortcut
-    static let btShortcutEnabled = "lidguard.btShortcutEnabled"
+    case btShortcutEnabled = "lidguard.btShortcutEnabled"
 
     // Notification toggles
-    static let notifyAutoArm = "lidguard.notifyAutoArm"
-    static let notifyProtectionToggle = "lidguard.notifyProtectionToggle"
+    case notifyAutoArm = "lidguard.notifyAutoArm"
+    case notifyProtectionToggle = "lidguard.notifyProtectionToggle"
 
     // Tracking data toggles
-    static let trackLocation = "lidguard.trackLocation"
-    static let trackPublicIP = "lidguard.trackPublicIP"
-    static let trackWiFi = "lidguard.trackWiFi"
-    static let trackBattery = "lidguard.trackBattery"
-    static let trackDeviceName = "lidguard.trackDeviceName"
+    case trackLocation = "lidguard.trackLocation"
+    case trackPublicIP = "lidguard.trackPublicIP"
+    case trackWiFi = "lidguard.trackWiFi"
+    case trackBattery = "lidguard.trackBattery"
+    case trackDeviceName = "lidguard.trackDeviceName"
 
     // Bluetooth
-    static let bluetoothAutoArmEnabled = "lidguard.bluetoothAutoArmEnabled"
-    static let trustedBLEDevices = "lidguard.trustedBLEDevices"
-    static let bluetoothArmGracePeriod = "lidguard.bluetoothArmGracePeriod"
+    case bluetoothAutoArmEnabled = "lidguard.bluetoothAutoArmEnabled"
+    case trustedBLEDevices = "lidguard.trustedBLEDevices"
+    case bluetoothArmGracePeriod = "lidguard.bluetoothArmGracePeriod"
   }
 
   private enum KeychainKeys {
@@ -90,13 +90,13 @@ final class SettingsService {
   // MARK: - Contact Info (UserDefaults)
 
   var contactName: String? {
-    get { defaults.string(forKey: Keys.contactName) }
-    set { defaults.set(newValue, forKey: Keys.contactName) }
+    get { defaults.string(forKey: Keys.contactName.rawValue) }
+    set { defaults.set(newValue, forKey: Keys.contactName.rawValue) }
   }
 
   var contactPhone: String? {
-    get { defaults.string(forKey: Keys.contactPhone) }
-    set { defaults.set(newValue, forKey: Keys.contactPhone) }
+    get { defaults.string(forKey: Keys.contactPhone.rawValue) }
+    set { defaults.set(newValue, forKey: Keys.contactPhone.rawValue) }
   }
 
   var contactDisplay: String {
@@ -131,8 +131,8 @@ final class SettingsService {
   }
 
   var telegramEnabled: Bool {
-    get { defaults.object(forKey: Keys.telegramEnabled) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.telegramEnabled) }
+    get { defaults.object(forKey: Keys.telegramEnabled.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.telegramEnabled.rawValue) }
   }
 
   var isTelegramConfigured: Bool {
@@ -142,38 +142,38 @@ final class SettingsService {
   // MARK: - Alarm Sound
 
   var alarmSound: String {
-    get { defaults.string(forKey: Keys.alarmSound) ?? "Siren" }
-    set { defaults.set(newValue, forKey: Keys.alarmSound) }
+    get { defaults.string(forKey: Keys.alarmSound.rawValue) ?? "Siren" }
+    set { defaults.set(newValue, forKey: Keys.alarmSound.rawValue) }
   }
 
   // MARK: - Triggers
 
   var triggerLidClose: Bool {
-    get { defaults.object(forKey: Keys.triggerLidClose) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.triggerLidClose) }
+    get { defaults.object(forKey: Keys.triggerLidClose.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.triggerLidClose.rawValue) }
   }
 
   /// When an external display is attached, suppress the lid-close trigger —
   /// clamshell mode at a dock is normal use, not theft.
   var suppressLidTriggerWhenExternalDisplay: Bool {
-    get { defaults.object(forKey: Keys.suppressLidTriggerWhenExternalDisplay) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.suppressLidTriggerWhenExternalDisplay) }
+    get { defaults.object(forKey: Keys.suppressLidTriggerWhenExternalDisplay.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.suppressLidTriggerWhenExternalDisplay.rawValue) }
   }
 
   var triggerPowerDisconnect: Bool {
-    get { defaults.object(forKey: Keys.triggerPowerDisconnect) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.triggerPowerDisconnect) }
+    get { defaults.object(forKey: Keys.triggerPowerDisconnect.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.triggerPowerDisconnect.rawValue) }
   }
 
   var triggerPowerButton: Bool {
-    get { defaults.object(forKey: Keys.triggerPowerButton) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.triggerPowerButton) }
+    get { defaults.object(forKey: Keys.triggerPowerButton.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.triggerPowerButton.rawValue) }
   }
 
   var triggerMotionDetect: Bool {
-    get { defaults.object(forKey: Keys.triggerMotionDetect) as? Bool ?? false }
+    get { defaults.object(forKey: Keys.triggerMotionDetect.rawValue) as? Bool ?? false }
     set {
-      defaults.set(newValue, forKey: Keys.triggerMotionDetect)
+      defaults.set(newValue, forKey: Keys.triggerMotionDetect.rawValue)
       NotificationCenter.default.post(name: .motionSettingsChanged, object: nil)
     }
   }
@@ -181,160 +181,160 @@ final class SettingsService {
   // MARK: - Global Shortcut
 
   var shortcutEnabled: Bool {
-    get { defaults.object(forKey: Keys.shortcutEnabled) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.shortcutEnabled) }
+    get { defaults.object(forKey: Keys.shortcutEnabled.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.shortcutEnabled.rawValue) }
   }
 
   // MARK: - Behaviors
 
   var behaviorSleepPrevention: Bool {
-    get { defaults.object(forKey: Keys.behaviorSleepPrevention) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.behaviorSleepPrevention) }
+    get { defaults.object(forKey: Keys.behaviorSleepPrevention.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.behaviorSleepPrevention.rawValue) }
   }
 
   var behaviorLidCloseSleep: Bool {
-    get { defaults.object(forKey: Keys.behaviorLidCloseSleep) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.behaviorLidCloseSleep) }
+    get { defaults.object(forKey: Keys.behaviorLidCloseSleep.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.behaviorLidCloseSleep.rawValue) }
   }
 
   var behaviorShutdownBlocking: Bool {
-    get { defaults.object(forKey: Keys.behaviorShutdownBlocking) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.behaviorShutdownBlocking) }
+    get { defaults.object(forKey: Keys.behaviorShutdownBlocking.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.behaviorShutdownBlocking.rawValue) }
   }
 
   var behaviorLockScreen: Bool {
-    get { defaults.object(forKey: Keys.behaviorLockScreen) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.behaviorLockScreen) }
+    get { defaults.object(forKey: Keys.behaviorLockScreen.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.behaviorLockScreen.rawValue) }
   }
 
   var lockScreenOnTheftMode: Bool {
-    get { defaults.object(forKey: Keys.lockScreenOnTheftMode) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.lockScreenOnTheftMode) }
+    get { defaults.object(forKey: Keys.lockScreenOnTheftMode.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.lockScreenOnTheftMode.rawValue) }
   }
 
   var lockScreenOnShortcut: Bool {
-    get { defaults.object(forKey: Keys.lockScreenOnShortcut) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.lockScreenOnShortcut) }
+    get { defaults.object(forKey: Keys.lockScreenOnShortcut.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.lockScreenOnShortcut.rawValue) }
   }
 
   var lockScreenOnBluetoothArm: Bool {
-    get { defaults.object(forKey: Keys.lockScreenOnBluetoothArm) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.lockScreenOnBluetoothArm) }
+    get { defaults.object(forKey: Keys.lockScreenOnBluetoothArm.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.lockScreenOnBluetoothArm.rawValue) }
   }
 
   var lockScreenOnTelegramEnable: Bool {
-    get { defaults.object(forKey: Keys.lockScreenOnTelegramEnable) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.lockScreenOnTelegramEnable) }
+    get { defaults.object(forKey: Keys.lockScreenOnTelegramEnable.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.lockScreenOnTelegramEnable.rawValue) }
   }
 
   var biometricAuthEnabled: Bool {
-    get { defaults.object(forKey: Keys.biometricAuthEnabled) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.biometricAuthEnabled) }
+    get { defaults.object(forKey: Keys.biometricAuthEnabled.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.biometricAuthEnabled.rawValue) }
   }
 
   var behaviorAlarm: Bool {
-    get { defaults.object(forKey: Keys.behaviorAlarm) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.behaviorAlarm) }
+    get { defaults.object(forKey: Keys.behaviorAlarm.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.behaviorAlarm.rawValue) }
   }
 
   var behaviorAutoAlarm: Bool {
-    get { defaults.object(forKey: Keys.behaviorAutoAlarm) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.behaviorAutoAlarm) }
+    get { defaults.object(forKey: Keys.behaviorAutoAlarm.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.behaviorAutoAlarm.rawValue) }
   }
 
   var alarmVolume: Int {
-    get { defaults.object(forKey: Keys.alarmVolume) as? Int ?? 100 }
-    set { defaults.set(newValue, forKey: Keys.alarmVolume) }
+    get { defaults.object(forKey: Keys.alarmVolume.rawValue) as? Int ?? 100 }
+    set { defaults.set(newValue, forKey: Keys.alarmVolume.rawValue) }
   }
 
   var offlineSirenEnabled: Bool {
-    get { defaults.object(forKey: Keys.offlineSirenEnabled) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.offlineSirenEnabled) }
+    get { defaults.object(forKey: Keys.offlineSirenEnabled.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.offlineSirenEnabled.rawValue) }
   }
 
   // MARK: - Updates
 
   var autoUpdateEnabled: Bool {
-    get { defaults.object(forKey: Keys.autoUpdateEnabled) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.autoUpdateEnabled) }
+    get { defaults.object(forKey: Keys.autoUpdateEnabled.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.autoUpdateEnabled.rawValue) }
   }
 
   var lastUpdateCheckDate: Date? {
-    get { defaults.object(forKey: Keys.lastUpdateCheckDate) as? Date }
-    set { defaults.set(newValue, forKey: Keys.lastUpdateCheckDate) }
+    get { defaults.object(forKey: Keys.lastUpdateCheckDate.rawValue) as? Date }
+    set { defaults.set(newValue, forKey: Keys.lastUpdateCheckDate.rawValue) }
   }
 
   var skippedVersion: String? {
-    get { defaults.string(forKey: Keys.skippedVersion) }
-    set { defaults.set(newValue, forKey: Keys.skippedVersion) }
+    get { defaults.string(forKey: Keys.skippedVersion.rawValue) }
+    set { defaults.set(newValue, forKey: Keys.skippedVersion.rawValue) }
   }
 
   var skippedHelperVersion: String? {
-    get { defaults.string(forKey: Keys.skippedHelperVersion) }
-    set { defaults.set(newValue, forKey: Keys.skippedHelperVersion) }
+    get { defaults.string(forKey: Keys.skippedHelperVersion.rawValue) }
+    set { defaults.set(newValue, forKey: Keys.skippedHelperVersion.rawValue) }
   }
 
   var lastHelperUpdateCheckDate: Date? {
-    get { defaults.object(forKey: Keys.lastHelperUpdateCheckDate) as? Date }
-    set { defaults.set(newValue, forKey: Keys.lastHelperUpdateCheckDate) }
+    get { defaults.object(forKey: Keys.lastHelperUpdateCheckDate.rawValue) as? Date }
+    set { defaults.set(newValue, forKey: Keys.lastHelperUpdateCheckDate.rawValue) }
   }
 
   // MARK: - Notification Toggles
 
   var notifyAutoArm: Bool {
-    get { defaults.object(forKey: Keys.notifyAutoArm) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.notifyAutoArm) }
+    get { defaults.object(forKey: Keys.notifyAutoArm.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.notifyAutoArm.rawValue) }
   }
 
   var notifyProtectionToggle: Bool {
-    get { defaults.object(forKey: Keys.notifyProtectionToggle) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.notifyProtectionToggle) }
+    get { defaults.object(forKey: Keys.notifyProtectionToggle.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.notifyProtectionToggle.rawValue) }
   }
 
   // MARK: - Tracking Data Toggles
 
   var trackLocation: Bool {
-    get { defaults.object(forKey: Keys.trackLocation) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.trackLocation) }
+    get { defaults.object(forKey: Keys.trackLocation.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.trackLocation.rawValue) }
   }
 
   var trackPublicIP: Bool {
-    get { defaults.object(forKey: Keys.trackPublicIP) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.trackPublicIP) }
+    get { defaults.object(forKey: Keys.trackPublicIP.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.trackPublicIP.rawValue) }
   }
 
   var trackWiFi: Bool {
-    get { defaults.object(forKey: Keys.trackWiFi) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.trackWiFi) }
+    get { defaults.object(forKey: Keys.trackWiFi.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.trackWiFi.rawValue) }
   }
 
   var trackBattery: Bool {
-    get { defaults.object(forKey: Keys.trackBattery) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.trackBattery) }
+    get { defaults.object(forKey: Keys.trackBattery.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.trackBattery.rawValue) }
   }
 
   var trackDeviceName: Bool {
-    get { defaults.object(forKey: Keys.trackDeviceName) as? Bool ?? true }
-    set { defaults.set(newValue, forKey: Keys.trackDeviceName) }
+    get { defaults.object(forKey: Keys.trackDeviceName.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.trackDeviceName.rawValue) }
   }
 
   // MARK: - Bluetooth Shortcut
 
   var btShortcutEnabled: Bool {
-    get { defaults.object(forKey: Keys.btShortcutEnabled) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.btShortcutEnabled) }
+    get { defaults.object(forKey: Keys.btShortcutEnabled.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.btShortcutEnabled.rawValue) }
   }
 
   // MARK: - Bluetooth
 
   var bluetoothAutoArmEnabled: Bool {
-    get { defaults.object(forKey: Keys.bluetoothAutoArmEnabled) as? Bool ?? false }
-    set { defaults.set(newValue, forKey: Keys.bluetoothAutoArmEnabled) }
+    get { defaults.object(forKey: Keys.bluetoothAutoArmEnabled.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.bluetoothAutoArmEnabled.rawValue) }
   }
 
   var trustedBLEDevices: [TrustedBLEDevice] {
     get {
-      guard let data = defaults.data(forKey: Keys.trustedBLEDevices),
+      guard let data = defaults.data(forKey: Keys.trustedBLEDevices.rawValue),
             let devices = try? JSONDecoder().decode([TrustedBLEDevice].self, from: data) else {
         return []
       }
@@ -342,14 +342,14 @@ final class SettingsService {
     }
     set {
       if let data = try? JSONEncoder().encode(newValue) {
-        defaults.set(data, forKey: Keys.trustedBLEDevices)
+        defaults.set(data, forKey: Keys.trustedBLEDevices.rawValue)
       }
     }
   }
 
   var bluetoothArmGracePeriod: TimeInterval {
-    get { defaults.object(forKey: Keys.bluetoothArmGracePeriod) as? TimeInterval ?? Config.Bluetooth.defaultArmGracePeriod }
-    set { defaults.set(newValue, forKey: Keys.bluetoothArmGracePeriod) }
+    get { defaults.object(forKey: Keys.bluetoothArmGracePeriod.rawValue) as? TimeInterval ?? Config.Bluetooth.defaultArmGracePeriod }
+    set { defaults.set(newValue, forKey: Keys.bluetoothArmGracePeriod.rawValue) }
   }
 
   var hasTrustedBLEDevices: Bool {
@@ -359,8 +359,8 @@ final class SettingsService {
   // MARK: - Setup
 
   var setupComplete: Bool {
-    get { defaults.bool(forKey: Keys.setupComplete) }
-    set { defaults.set(newValue, forKey: Keys.setupComplete) }
+    get { defaults.bool(forKey: Keys.setupComplete.rawValue) }
+    set { defaults.set(newValue, forKey: Keys.setupComplete.rawValue) }
   }
 
   func isConfigured() -> Bool {
@@ -370,47 +370,11 @@ final class SettingsService {
   // MARK: - Reset
 
   func resetAll() {
-    // Clear UserDefaults
-    defaults.removeObject(forKey: Keys.contactName)
-    defaults.removeObject(forKey: Keys.contactPhone)
-    defaults.removeObject(forKey: Keys.telegramEnabled)
-    defaults.removeObject(forKey: Keys.alarmSound)
-    defaults.removeObject(forKey: Keys.triggerLidClose)
-    defaults.removeObject(forKey: Keys.suppressLidTriggerWhenExternalDisplay)
-    defaults.removeObject(forKey: Keys.triggerPowerDisconnect)
-    defaults.removeObject(forKey: Keys.triggerPowerButton)
-    defaults.removeObject(forKey: Keys.triggerMotionDetect)
-    defaults.removeObject(forKey: Keys.shortcutEnabled)
-    defaults.removeObject(forKey: Keys.behaviorSleepPrevention)
-    defaults.removeObject(forKey: Keys.behaviorLidCloseSleep)
-    defaults.removeObject(forKey: Keys.behaviorShutdownBlocking)
-    defaults.removeObject(forKey: Keys.behaviorLockScreen)
-    defaults.removeObject(forKey: Keys.lockScreenOnTheftMode)
-    defaults.removeObject(forKey: Keys.lockScreenOnShortcut)
-    defaults.removeObject(forKey: Keys.lockScreenOnBluetoothArm)
-    defaults.removeObject(forKey: Keys.lockScreenOnTelegramEnable)
-    defaults.removeObject(forKey: Keys.biometricAuthEnabled)
-    defaults.removeObject(forKey: Keys.behaviorAlarm)
-    defaults.removeObject(forKey: Keys.behaviorAutoAlarm)
-    defaults.removeObject(forKey: Keys.alarmVolume)
-    defaults.removeObject(forKey: Keys.offlineSirenEnabled)
-    defaults.removeObject(forKey: Keys.notifyAutoArm)
-    defaults.removeObject(forKey: Keys.notifyProtectionToggle)
-    defaults.removeObject(forKey: Keys.trackLocation)
-    defaults.removeObject(forKey: Keys.trackPublicIP)
-    defaults.removeObject(forKey: Keys.trackWiFi)
-    defaults.removeObject(forKey: Keys.trackBattery)
-    defaults.removeObject(forKey: Keys.trackDeviceName)
-    defaults.removeObject(forKey: Keys.setupComplete)
-    defaults.removeObject(forKey: Keys.autoUpdateEnabled)
-    defaults.removeObject(forKey: Keys.lastUpdateCheckDate)
-    defaults.removeObject(forKey: Keys.skippedVersion)
-    defaults.removeObject(forKey: Keys.skippedHelperVersion)
-    defaults.removeObject(forKey: Keys.lastHelperUpdateCheckDate)
-    defaults.removeObject(forKey: Keys.btShortcutEnabled)
-    defaults.removeObject(forKey: Keys.bluetoothAutoArmEnabled)
-    defaults.removeObject(forKey: Keys.trustedBLEDevices)
-    defaults.removeObject(forKey: Keys.bluetoothArmGracePeriod)
+    // Clear UserDefaults — iterate every case so a newly added key can never
+    // be forgotten here (the omission that previously stranded one setting).
+    for key in Keys.allCases {
+      defaults.removeObject(forKey: key.rawValue)
+    }
 
     // Clear Keychain
     KeychainService.deleteAll()

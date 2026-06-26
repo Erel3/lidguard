@@ -15,21 +15,24 @@ enum OutboxFlush {
     let textItems = items.filter { $0.kind != .photo }.sorted { $0.timestamp < $1.timestamp }
     let photoItems = items.filter { $0.kind == .photo }.sorted { $0.timestamp < $1.timestamp }
 
-    let message: String?
+    let rawMessage: String?
     if textItems.isEmpty {
-      message = nil
+      rawMessage = nil
     } else if textItems.count == 1 {
-      message = textItems[0].renderedMessage
+      rawMessage = textItems[0].renderedMessage
     } else {
-      message = CoalesceSummary.build(from: textItems.compactMap { $0.snapshot })
+      rawMessage = CoalesceSummary.build(from: textItems.compactMap { $0.snapshot })
     }
+    // Never consume text items we cannot actually send (nil/empty message) — keep them queued.
+    let message = (rawMessage?.isEmpty == false) ? rawMessage : nil
+    let consumedTextIDs = message == nil ? [] : textItems.map { $0.id }
 
     let keep = photoItems.suffix(max(0, photoCap))
     let drop = photoItems.dropLast(keep.count)
 
     return Plan(
       message: message,
-      textItemIDs: textItems.map { $0.id },
+      textItemIDs: consumedTextIDs,
       photoItemIDs: keep.map { $0.id },
       photoDropIDs: drop.map { $0.id }
     )

@@ -17,6 +17,7 @@ struct OutboxItem: Codable, Equatable {
 
 /// Disk-backed FIFO of pending Telegram deliveries. Survives relaunch so updates
 /// captured just before a power-off are not lost. Best-effort persistence.
+@MainActor
 final class TrackingOutbox {
   private let directory: URL
   private let indexURL: URL

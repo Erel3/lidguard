@@ -31,7 +31,7 @@ enum CoalesceSummary {
 
     if let endIP = last.publicIP {
       let changed = first.publicIP != nil && first.publicIP != last.publicIP
-      lines.append("🌐 <b>Public IP:</b> \(endIP)\(changed ? " (changed)" : "")")
+      lines.append("🌐 <b>Public IP:</b> \(htmlEscape(endIP))\(changed ? " (changed)" : "")")
     }
     if let endWifi = last.wifiName {
       let changed = first.wifiName != nil && first.wifiName != last.wifiName

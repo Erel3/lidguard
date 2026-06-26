@@ -67,6 +67,10 @@ lint:
     TOOLCHAIN_DIR=$(dirname "$(dirname "$(xcrun --find swiftc)")")
     DYLD_FRAMEWORK_PATH="$TOOLCHAIN_DIR/lib" swiftlint lint --strict Sources/
 
+# Run unit tests (SwiftPM test target)
+test *ARGS:
+    swift test {{ARGS}}
+
 # Generate app icon
 icon:
     swift Scripts/generate_icon.swift

@@ -19,6 +19,14 @@ let package = Package(
       swiftSettings: [
         .swiftLanguageMode(.v6)
       ]
+    ),
+    .testTarget(
+      name: "LidGuardTests",
+      dependencies: ["LidGuard"],
+      path: "Tests/LidGuardTests",
+      swiftSettings: [
+        .swiftLanguageMode(.v6)
+      ]
     )
   ]
 )

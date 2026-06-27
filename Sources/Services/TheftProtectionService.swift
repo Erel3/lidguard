@@ -55,6 +55,10 @@ final class TheftProtectionService {
   private let globalShortcutService = GlobalShortcutService()
   let bluetoothProximityService = BluetoothProximityService()
   let theftStateStore = TheftStateStore(directory: AppPaths.supportDirectory)
+  let outbox = TrackingOutbox(directory: AppPaths.supportDirectory)
+  /// Max photos sent on a single reconnect/backlog flush; older queued photos are dropped.
+  static let reconnectPhotoCap = 3
+  var isFlushingOutbox = false
 
   var lastManualDisarmTime: Date?
   var lastArmTime: Date?
@@ -390,6 +394,7 @@ final class TheftProtectionService {
     theftStateStore.save(TheftStateRecord(state: "theftMode", trigger: trigger.description, startedAt: Date()))
     updateCount = 0
     theftEpisodeId &+= 1
+    outbox.clear()  // fresh incident — discard any leftovers from a prior episode
     bleAutoDisarmArmed = false
     suppressedLidClose = false
     Logger.theft.warning("THEFT MODE ACTIVATED - \(trigger.description)")
@@ -436,6 +441,7 @@ final class TheftProtectionService {
     state = restoredState
     stateBeforeTheft = nil
     theftStateStore.clear()
+    outbox.clear()  // incident closed by owner — drop undelivered queue + photo sidecars
     stopTracking()
     updateCount = 0
     currentTrigger = nil

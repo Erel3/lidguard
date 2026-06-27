@@ -475,6 +475,8 @@ final class TheftProtectionService {
     ActivityLog.logAsync(.theft, "Theft mode resumed after power-off")
 
     startMonitors()
+    // Mirror activateTheftMode: stop motion monitoring while in theft mode (saves helper CPU/log spam).
+    daemonClient.disableMotionMonitoring()
 
     let settings = SettingsService.shared
     if settings.lockScreenOnTheftMode {
@@ -490,6 +492,13 @@ final class TheftProtectionService {
     }
 
     telegramSucceededInTheftMode = false
+    // Mirror activateTheftMode: if Telegram is unavailable, play the siren immediately.
+    if settings.offlineSirenEnabled && settings.behaviorAlarm
+       && (!Config.Telegram.isConfigured || !Config.Telegram.isEnabled) {
+      AlarmAudioManager.shared.play()
+      ActivityLog.logAsync(.theft, "Offline siren triggered (Telegram not configured/disabled)")
+    }
+
     notificationService.send(
       message: "⚠️ <b>DEVICE POWERED BACK ON — THEFT MODE RESUMED</b>\n\nThe device was powered off during theft mode and has just restarted.",
       keyboard: AlarmAudioManager.shared.isPlaying ? .theftModeAlarmOn : .theftMode,

@@ -551,10 +551,15 @@ final class TheftProtectionService {
   /// Falls back to a single photo if video capture fails. Best-effort; never blocks tracking.
   func captureVideoIfEnabled(caption: String) {
     guard state == .theftMode, SettingsService.shared.photoCaptureEnabled else { return }
+    let episode = theftEpisodeId
     camera.captureVideo { [weak self] url in
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
-          guard let self, self.state == .theftMode else { return }
+          guard let self, self.state == .theftMode, self.theftEpisodeId == episode else {
+            // Disarmed / new episode during the ~5s record — don't leak the temp clip.
+            if let url { try? FileManager.default.removeItem(at: url) }
+            return
+          }
           guard let url else {
             ActivityLog.logAsync(.theft, "Thief video capture failed — falling back to photo")
             self.capturePhotoIfEnabled(caption: caption)

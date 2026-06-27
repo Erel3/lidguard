@@ -123,7 +123,8 @@ extension TheftProtectionService {
         }
       }
       if item.kind == .video {
-        guard let fileURL = outbox.mediaFileURL(for: item) else { outbox.remove(ids: [item.id]); continue }
+        guard let fileURL = outbox.mediaFileURL(for: item),
+              FileManager.default.fileExists(atPath: fileURL.path) else { outbox.remove(ids: [item.id]); continue }
         inFlightMediaIDs.insert(item.id)
         notificationService.sendVideo(fileURL: fileURL, caption: caption, keyboard: keyboard, completion: onResult)
       } else {

@@ -152,6 +152,7 @@ final class CameraCaptureService: NSObject, CameraCapturing {
     movieOutput = nil
     let cb = videoPending
     videoPending = nil
+    if cb == nil, let url { try? FileManager.default.removeItem(at: url) }  // no consumer (watchdog fired) — clean up
     cb?(url)
   }
 }

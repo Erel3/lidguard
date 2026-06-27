@@ -54,11 +54,13 @@ final class TheftProtectionService {
   let daemonClient: DaemonIPC
   private let globalShortcutService = GlobalShortcutService()
   let bluetoothProximityService = BluetoothProximityService()
+  let camera: CameraCapturing = CameraCaptureService.shared
   let theftStateStore = TheftStateStore(directory: AppPaths.supportDirectory)
   let outbox = TrackingOutbox(directory: AppPaths.supportDirectory)
   /// Max photos sent on a single reconnect/backlog flush; older queued photos are dropped.
   static let reconnectPhotoCap = 3
   var isFlushingOutbox = false
+  var inFlightPhotoIDs: Set<String> = []
 
   var lastManualDisarmTime: Date?
   var lastArmTime: Date?
@@ -395,6 +397,7 @@ final class TheftProtectionService {
     updateCount = 0
     theftEpisodeId &+= 1
     outbox.clear()  // fresh incident — discard any leftovers from a prior episode
+    inFlightPhotoIDs.removeAll()
     bleAutoDisarmArmed = false
     suppressedLidClose = false
     Logger.theft.warning("THEFT MODE ACTIVATED - \(trigger.description)")
@@ -429,6 +432,7 @@ final class TheftProtectionService {
     }
 
     sendInitialTheftUpdate()
+    capturePhotoIfEnabled(caption: "🕵️ <b>Thief photo</b> — theft activated")
     startTracking()
 
     delegate?.theftProtectionStateDidChange(self, state: .theftMode)
@@ -442,6 +446,7 @@ final class TheftProtectionService {
     stateBeforeTheft = nil
     theftStateStore.clear()
     outbox.clear()  // incident closed by owner — drop undelivered queue + photo sidecars
+    inFlightPhotoIDs.removeAll()
     stopTracking()
     updateCount = 0
     currentTrigger = nil
@@ -512,8 +517,32 @@ final class TheftProtectionService {
     )
 
     sendInitialTheftUpdate()
+    capturePhotoIfEnabled(caption: "🕵️ <b>Thief photo</b> — resumed after power-off")
     startTracking()
     delegate?.theftProtectionStateDidChange(self, state: .theftMode)
+  }
+
+  /// Captures a thief photo (if enabled + permitted), queues it, and flushes.
+  /// Best-effort: any failure is logged and ignored; never blocks tracking.
+  func capturePhotoIfEnabled(caption: String) {
+    guard state == .theftMode, SettingsService.shared.photoCaptureEnabled else { return }
+    camera.capturePhoto { [weak self] data in
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          guard let self, self.state == .theftMode else { return }
+          guard let data else {
+            ActivityLog.logAsync(.theft, "Thief photo capture failed")
+            return
+          }
+          let id = UUID().uuidString
+          guard let filename = self.outbox.storePhoto(data, id: id) else { return }
+          self.outbox.enqueue(OutboxItem(id: id, timestamp: Date(), kind: .photo, snapshot: nil,
+                                         renderedMessage: caption, photoFilename: filename))
+          ActivityLog.logAsync(.theft, "Thief photo captured")
+          self.flushOutbox()
+        }
+      }
+    }
   }
 
   func refreshLocation() {

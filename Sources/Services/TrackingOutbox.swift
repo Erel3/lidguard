@@ -29,6 +29,7 @@ final class TrackingOutbox {
     self.indexURL = directory.appendingPathComponent("outbox.json")
     self.maxItems = maxItems
     self.items = Self.loadIndex(indexURL)
+    reconcileOrphanSidecars()
   }
 
   var count: Int { items.count }
@@ -80,6 +81,16 @@ final class TrackingOutbox {
   private func deletePhoto(_ item: OutboxItem) {
     guard let filename = item.photoFilename else { return }
     try? FileManager.default.removeItem(at: directory.appendingPathComponent(filename))
+  }
+
+  /// Deletes any `*.jpg` sidecar with no matching OutboxItem (e.g. a crash between
+  /// storePhoto and enqueue), so orphaned photos don't accumulate on disk.
+  private func reconcileOrphanSidecars() {
+    let referenced = Set(items.compactMap { $0.photoFilename })
+    guard let files = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return }
+    for file in files where file.hasSuffix(".jpg") && !referenced.contains(file) {
+      try? FileManager.default.removeItem(at: directory.appendingPathComponent(file))
+    }
   }
 
   private func persist() {

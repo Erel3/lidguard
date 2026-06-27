@@ -28,6 +28,11 @@ extension TheftProtectionService {
 
   fileprivate func sendUpdate(type: UpdateType) {
     updateCount += 1
+    if type == .tracking,
+       PhotoCadence.shouldCaptureOnUpdate(updateCount: updateCount,
+                                          everyN: SettingsService.shared.photoCaptureEveryN) {
+      capturePhotoIfEnabled(caption: "🕵️ <b>Thief photo</b> — update #\(updateCount)")
+    }
 
     deviceInfoCollector.collect { [weak self] info in
       MainActor.assumeIsolated {
@@ -97,8 +102,30 @@ extension TheftProtectionService {
   }
 
   func flushPhotos(ids: [String]) {
-    // Placeholder until Task 10 wires sendPhoto. Photos are sent newest-first.
-    // Keeping items queued here is intentional: Task 10 will deliver + remove them.
+    guard state == .theftMode else { return }
+    // Send oldest→newest of the capped set; skip photos already in flight (prevents a
+    // concurrent flush from double-sending the same photo); remove each on success.
+    let items = outbox.items
+      .filter { ids.contains($0.id) && $0.kind == .photo && !inFlightPhotoIDs.contains($0.id) }
+      .sorted { $0.timestamp < $1.timestamp }
+    guard !items.isEmpty else { return }
+    let keyboard: TelegramKeyboard = AlarmAudioManager.shared.isPlaying ? .theftModeAlarmOn : .theftMode
+    for item in items {
+      guard let data = outbox.photoData(for: item) else { outbox.remove(ids: [item.id]); continue }
+      inFlightPhotoIDs.insert(item.id)
+      let caption = item.renderedMessage ?? "🕵️ Thief photo"
+      let episode = theftEpisodeId
+      notificationService.sendPhoto(jpeg: data, caption: caption, keyboard: keyboard) { [weak self] success in
+        DispatchQueue.main.async {
+          MainActor.assumeIsolated {
+            guard let self else { return }
+            self.inFlightPhotoIDs.remove(item.id)
+            guard self.state == .theftMode, self.theftEpisodeId == episode else { return }
+            if success { self.outbox.remove(ids: [item.id]) }
+          }
+        }
+      }
+    }
   }
 
   fileprivate func scheduleOfflineSiren() {

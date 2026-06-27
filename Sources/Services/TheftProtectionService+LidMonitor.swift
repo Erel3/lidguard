@@ -16,6 +16,9 @@ extension TheftProtectionService: LidMonitorDelegate {
   }
 
   func lidMonitorDidDetectOpen(_ monitor: LidMonitorService) {
+    if state == .theftMode {
+      capturePhotoIfEnabled(caption: "🕵️ <b>Thief photo</b> — lid opened")
+    }
     suppressedLidClose = false
     Logger.theft.info("Lid opened - theft mode still active")
     ActivityLog.logAsync(.trigger, "Lid opened - theft mode still active")

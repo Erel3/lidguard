@@ -1,12 +1,13 @@
 import AVFoundation
 import Foundation
 
-/// Pure cadence rule: capture on every Nth tracking update (update 0 is the initial
-/// update, already covered by capture-on-activation, so it is excluded).
+/// Pure cadence rule: capture on every Nth *tracking* update. `updateCount` counts all
+/// updates including the initial one (sent at activation, updateCount == 1, already covered
+/// by capture-on-activation), so `(updateCount - 1)` is the tracking-tick index for cadence.
 enum PhotoCadence {
   static func shouldCaptureOnUpdate(updateCount: Int, everyN: Int) -> Bool {
-    guard everyN > 0, updateCount > 0 else { return false }
-    return updateCount % everyN == 0
+    guard everyN > 0, updateCount > 1 else { return false }
+    return (updateCount - 1) % everyN == 0
   }
 }
 

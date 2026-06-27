@@ -75,6 +75,10 @@ final class SettingsService {
     case trackBattery = "lidguard.trackBattery"
     case trackDeviceName = "lidguard.trackDeviceName"
 
+    // Photo capture
+    case photoCaptureEnabled = "lidguard.photoCaptureEnabled"
+    case photoCaptureEveryN = "lidguard.photoCaptureEveryN"
+
     // Bluetooth
     case bluetoothAutoArmEnabled = "lidguard.bluetoothAutoArmEnabled"
     case trustedBLEDevices = "lidguard.trustedBLEDevices"
@@ -322,6 +326,16 @@ final class SettingsService {
   var trackDeviceName: Bool {
     get { defaults.object(forKey: Keys.trackDeviceName.rawValue) as? Bool ?? true }
     set { defaults.set(newValue, forKey: Keys.trackDeviceName.rawValue) }
+  }
+
+  var photoCaptureEnabled: Bool {
+    get { defaults.object(forKey: Keys.photoCaptureEnabled.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Keys.photoCaptureEnabled.rawValue) }
+  }
+
+  var photoCaptureEveryN: Int {
+    get { defaults.object(forKey: Keys.photoCaptureEveryN.rawValue) as? Int ?? 3 }
+    set { defaults.set(newValue, forKey: Keys.photoCaptureEveryN.rawValue) }
   }
 
   // MARK: - Bluetooth Shortcut

@@ -32,6 +32,8 @@ final class CameraCaptureService: NSObject, CameraCapturing {
   private var session: AVCaptureSession?
   private var output: AVCapturePhotoOutput?
   private var pending: (@Sendable (Data?) -> Void)?
+  // Distinguishes capture attempts so a stale warm-up/watchdog can't act on a newer capture.
+  private var captureGeneration = 0
 
   func authorizationStatus() -> AVAuthorizationStatus {
     AVCaptureDevice.authorizationStatus(for: .video)
@@ -61,13 +63,24 @@ final class CameraCaptureService: NSObject, CameraCapturing {
     self.session = session
     self.output = output
     self.pending = completion
+    captureGeneration &+= 1
+    let gen = captureGeneration
 
     session.startRunning()
     // Brief warm-up so the sensor exposes before the shot.
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
       MainActor.assumeIsolated {
-        guard let self, let output = self.output else { return }
+        guard let self, self.captureGeneration == gen, let output = self.output else { return }
         output.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
+      }
+    }
+    // Watchdog: if the delegate never fires (camera contention / runtime error), tear the
+    // session down and fail this capture so the camera frees and future captures aren't blocked.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self, self.captureGeneration == gen, self.pending != nil else { return }
+        ActivityLog.logAsync(.theft, "Thief photo capture timed out")
+        self.finish(nil)
       }
     }
   }

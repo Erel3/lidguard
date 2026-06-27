@@ -398,6 +398,7 @@ final class TheftProtectionService {
     theftEpisodeId &+= 1
     outbox.clear()  // fresh incident — discard any leftovers from a prior episode
     inFlightPhotoIDs.removeAll()
+    isFlushingOutbox = false
     bleAutoDisarmArmed = false
     suppressedLidClose = false
     Logger.theft.warning("THEFT MODE ACTIVATED - \(trigger.description)")
@@ -447,6 +448,7 @@ final class TheftProtectionService {
     theftStateStore.clear()
     outbox.clear()  // incident closed by owner — drop undelivered queue + photo sidecars
     inFlightPhotoIDs.removeAll()
+    isFlushingOutbox = false
     stopTracking()
     updateCount = 0
     currentTrigger = nil

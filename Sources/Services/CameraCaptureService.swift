@@ -16,6 +16,7 @@ protocol CameraCapturing {
   func authorizationStatus() -> AVAuthorizationStatus
   func requestAccess(_ completion: @escaping @Sendable (Bool) -> Void)
   func capturePhoto(_ completion: @escaping @Sendable (Data?) -> Void)
+  func captureVideo(_ completion: @escaping @Sendable (URL?) -> Void)
 }
 
 /// Captures a single JPEG from the front camera, tearing the session down after each
@@ -29,11 +30,16 @@ final class CameraCaptureService: NSObject, CameraCapturing {
   // so a separately-constructed instance would deliver its result to the wrong object.
   private override init() { super.init() }
 
+  static let videoDuration: TimeInterval = 5
+
   private var session: AVCaptureSession?
   private var output: AVCapturePhotoOutput?
   private var pending: (@Sendable (Data?) -> Void)?
   // Distinguishes capture attempts so a stale warm-up/watchdog can't act on a newer capture.
   private var captureGeneration = 0
+
+  private var movieOutput: AVCaptureMovieFileOutput?
+  private var videoPending: (@Sendable (URL?) -> Void)?
 
   func authorizationStatus() -> AVAuthorizationStatus {
     AVCaptureDevice.authorizationStatus(for: .video)
@@ -46,7 +52,7 @@ final class CameraCaptureService: NSObject, CameraCapturing {
   func capturePhoto(_ completion: @escaping @Sendable (Data?) -> Void) {
     // Best-effort, one shot at a time: if a capture is already in flight, skip this one
     // rather than clobber the in-flight session/completion.
-    guard pending == nil else { completion(nil); return }
+    guard pending == nil, videoPending == nil else { completion(nil); return }
     guard authorizationStatus() == .authorized else { completion(nil); return }
     guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
           let input = try? AVCaptureDeviceInput(device: device) else { completion(nil); return }
@@ -93,6 +99,61 @@ final class CameraCaptureService: NSObject, CameraCapturing {
     pending = nil
     cb?(data)
   }
+
+  func captureVideo(_ completion: @escaping @Sendable (URL?) -> Void) {
+    guard pending == nil, videoPending == nil else { completion(nil); return }
+    guard authorizationStatus() == .authorized else { completion(nil); return }
+    guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
+          let input = try? AVCaptureDeviceInput(device: device) else { completion(nil); return }
+
+    let session = AVCaptureSession()
+    session.sessionPreset = .high
+    guard session.canAddInput(input) else { completion(nil); return }
+    session.addInput(input)            // video only — no audio input
+
+    let movieOutput = AVCaptureMovieFileOutput()
+    guard session.canAddOutput(movieOutput) else { completion(nil); return }
+    session.addOutput(movieOutput)
+
+    self.session = session
+    self.movieOutput = movieOutput
+    self.videoPending = completion
+    captureGeneration &+= 1
+    let gen = captureGeneration
+
+    session.startRunning()
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self, self.captureGeneration == gen, let movieOutput = self.movieOutput else { return }
+        movieOutput.startRecording(to: url, recordingDelegate: self)
+        DispatchQueue.main.asyncAfter(deadline: .now() + CameraCaptureService.videoDuration) { [weak self] in
+          MainActor.assumeIsolated {
+            guard let self, self.captureGeneration == gen,
+                  let movieOutput = self.movieOutput, movieOutput.isRecording else { return }
+            movieOutput.stopRecording()   // -> fileOutput(_:didFinishRecordingTo:...)
+          }
+        }
+      }
+    }
+    // Watchdog: if recording never completes, tear down + fail so the camera frees.
+    DispatchQueue.main.asyncAfter(deadline: .now() + CameraCaptureService.videoDuration + 4.0) { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self, self.captureGeneration == gen, self.videoPending != nil else { return }
+        ActivityLog.logAsync(.theft, "Thief video capture timed out")
+        self.finishVideo(nil)
+      }
+    }
+  }
+
+  private func finishVideo(_ url: URL?) {
+    session?.stopRunning()
+    session = nil
+    movieOutput = nil
+    let cb = videoPending
+    videoPending = nil
+    cb?(url)
+  }
 }
 
 extension CameraCaptureService: AVCapturePhotoCaptureDelegate {
@@ -103,6 +164,26 @@ extension CameraCaptureService: AVCapturePhotoCaptureDelegate {
     DispatchQueue.main.async {
       MainActor.assumeIsolated {
         CameraCaptureService.shared.finish(error == nil ? data : nil)
+      }
+    }
+  }
+}
+
+extension CameraCaptureService: AVCaptureFileOutputRecordingDelegate {
+  nonisolated func fileOutput(_ output: AVCaptureFileOutput,
+                              didFinishRecordingTo outputFileURL: URL,
+                              from connections: [AVCaptureConnection],
+                              error: Error?) {
+    // AVFoundation can report a benign "error" (e.g. stopped at max duration) while the
+    // file is still usable — treat AVErrorRecordingSuccessfullyFinishedKey == true as success.
+    let succeeded = error == nil
+      || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool) == true
+    if !succeeded {
+      try? FileManager.default.removeItem(at: outputFileURL)   // drop the partial recording
+    }
+    DispatchQueue.main.async {
+      MainActor.assumeIsolated {
+        CameraCaptureService.shared.finishVideo(succeeded ? outputFileURL : nil)
       }
     }
   }

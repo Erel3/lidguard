@@ -74,7 +74,7 @@ extension TheftProtectionService {
     outbox.remove(ids: plan.photoDropIDs)   // drop stale photos beyond the cap
 
     guard let message = plan.message else {
-      flushPhotos(ids: plan.photoItemIDs)
+      flushMedia(ids: plan.photoItemIDs)
       return
     }
 
@@ -91,7 +91,7 @@ extension TheftProtectionService {
             self.outbox.remove(ids: plan.textItemIDs)
             self.telegramSucceededInTheftMode = true
             self.cancelOfflineSirenTimer()
-            self.flushPhotos(ids: plan.photoItemIDs)
+            self.flushMedia(ids: plan.photoItemIDs)
             self.flushOutbox()  // deliver anything enqueued during the in-flight send
           } else {
             self.scheduleOfflineSiren()
@@ -101,29 +101,35 @@ extension TheftProtectionService {
     }
   }
 
-  func flushPhotos(ids: [String]) {
+  func flushMedia(ids: [String]) {
     guard state == .theftMode else { return }
-    // Send oldest→newest of the capped set; skip photos already in flight (prevents a
-    // concurrent flush from double-sending the same photo); remove each on success.
+    // Send oldest→newest of the capped set; skip media already in flight; remove on success.
     let items = outbox.items
-      .filter { ids.contains($0.id) && $0.kind == .photo && !inFlightPhotoIDs.contains($0.id) }
+      .filter { ids.contains($0.id) && ($0.kind == .photo || $0.kind == .video) && !inFlightMediaIDs.contains($0.id) }
       .sorted { $0.timestamp < $1.timestamp }
     guard !items.isEmpty else { return }
     let keyboard: TelegramKeyboard = AlarmAudioManager.shared.isPlaying ? .theftModeAlarmOn : .theftMode
     for item in items {
-      guard let data = outbox.mediaData(for: item) else { outbox.remove(ids: [item.id]); continue }
-      inFlightPhotoIDs.insert(item.id)
-      let caption = item.renderedMessage ?? "🕵️ Thief photo"
+      let caption = item.renderedMessage ?? "🕵️ Thief media"
       let episode = theftEpisodeId
-      notificationService.sendPhoto(jpeg: data, caption: caption, keyboard: keyboard) { [weak self] success in
+      let onResult: @Sendable (Bool) -> Void = { [weak self] success in
         DispatchQueue.main.async {
           MainActor.assumeIsolated {
             guard let self else { return }
-            self.inFlightPhotoIDs.remove(item.id)
+            self.inFlightMediaIDs.remove(item.id)
             guard self.state == .theftMode, self.theftEpisodeId == episode else { return }
             if success { self.outbox.remove(ids: [item.id]) }
           }
         }
+      }
+      if item.kind == .video {
+        guard let fileURL = outbox.mediaFileURL(for: item) else { outbox.remove(ids: [item.id]); continue }
+        inFlightMediaIDs.insert(item.id)
+        notificationService.sendVideo(fileURL: fileURL, caption: caption, keyboard: keyboard, completion: onResult)
+      } else {
+        guard let data = outbox.mediaData(for: item) else { outbox.remove(ids: [item.id]); continue }
+        inFlightMediaIDs.insert(item.id)
+        notificationService.sendPhoto(jpeg: data, caption: caption, keyboard: keyboard, completion: onResult)
       }
     }
   }

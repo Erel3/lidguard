@@ -60,7 +60,7 @@ final class TheftProtectionService {
   /// Max photos sent on a single reconnect/backlog flush; older queued photos are dropped.
   static let reconnectPhotoCap = 3
   var isFlushingOutbox = false
-  var inFlightPhotoIDs: Set<String> = []
+  var inFlightMediaIDs: Set<String> = []
 
   var lastManualDisarmTime: Date?
   var lastArmTime: Date?
@@ -397,7 +397,7 @@ final class TheftProtectionService {
     updateCount = 0
     theftEpisodeId &+= 1
     outbox.clear()  // fresh incident — discard any leftovers from a prior episode
-    inFlightPhotoIDs.removeAll()
+    inFlightMediaIDs.removeAll()
     isFlushingOutbox = false
     bleAutoDisarmArmed = false
     suppressedLidClose = false
@@ -433,7 +433,7 @@ final class TheftProtectionService {
     }
 
     sendInitialTheftUpdate()
-    capturePhotoIfEnabled(caption: "🕵️ <b>Thief photo</b> — theft activated")
+    captureVideoIfEnabled(caption: "🎥 <b>Thief video</b> — theft activated")
     startTracking()
 
     delegate?.theftProtectionStateDidChange(self, state: .theftMode)
@@ -447,7 +447,7 @@ final class TheftProtectionService {
     stateBeforeTheft = nil
     theftStateStore.clear()
     outbox.clear()  // incident closed by owner — drop undelivered queue + photo sidecars
-    inFlightPhotoIDs.removeAll()
+    inFlightMediaIDs.removeAll()
     isFlushingOutbox = false
     stopTracking()
     updateCount = 0
@@ -519,7 +519,7 @@ final class TheftProtectionService {
     )
 
     sendInitialTheftUpdate()
-    capturePhotoIfEnabled(caption: "🕵️ <b>Thief photo</b> — resumed after power-off")
+    captureVideoIfEnabled(caption: "🎥 <b>Thief video</b> — resumed after power-off")
     startTracking()
     delegate?.theftProtectionStateDidChange(self, state: .theftMode)
   }
@@ -541,6 +541,30 @@ final class TheftProtectionService {
           self.outbox.enqueue(OutboxItem(id: id, timestamp: Date(), kind: .photo, snapshot: nil,
                                          renderedMessage: caption, mediaFilename: filename))
           ActivityLog.logAsync(.theft, "Thief photo captured")
+          self.flushOutbox()
+        }
+      }
+    }
+  }
+
+  /// Captures a short thief VIDEO (if enabled + permitted), queues it, and flushes.
+  /// Falls back to a single photo if video capture fails. Best-effort; never blocks tracking.
+  func captureVideoIfEnabled(caption: String) {
+    guard state == .theftMode, SettingsService.shared.photoCaptureEnabled else { return }
+    camera.captureVideo { [weak self] url in
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          guard let self, self.state == .theftMode else { return }
+          guard let url else {
+            ActivityLog.logAsync(.theft, "Thief video capture failed — falling back to photo")
+            self.capturePhotoIfEnabled(caption: caption)
+            return
+          }
+          let id = UUID().uuidString
+          guard let filename = self.outbox.storeVideo(from: url, id: id) else { return }
+          self.outbox.enqueue(OutboxItem(id: id, timestamp: Date(), kind: .video, snapshot: nil,
+                                         renderedMessage: caption, mediaFilename: filename))
+          ActivityLog.logAsync(.theft, "Thief video captured")
           self.flushOutbox()
         }
       }

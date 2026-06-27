@@ -12,8 +12,8 @@ enum OutboxFlush {
   }
 
   static func plan(items: [OutboxItem], photoCap: Int) -> Plan {
-    let textItems = items.filter { $0.kind != .photo }.sorted { $0.timestamp < $1.timestamp }
-    let photoItems = items.filter { $0.kind == .photo }.sorted { $0.timestamp < $1.timestamp }
+    let textItems = items.filter { $0.kind != .photo && $0.kind != .video }.sorted { $0.timestamp < $1.timestamp }
+    let photoItems = items.filter { $0.kind == .photo || $0.kind == .video }.sorted { $0.timestamp < $1.timestamp }
 
     let rawMessage: String?
     if textItems.isEmpty {

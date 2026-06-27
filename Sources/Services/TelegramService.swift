@@ -13,6 +13,7 @@ enum TelegramKeyboard: Sendable {
 protocol NotificationService {
   func send(message: String, keyboard: TelegramKeyboard, completion: (@Sendable (Bool) -> Void)?)
   func sendPhoto(jpeg: Data, caption: String, keyboard: TelegramKeyboard, completion: (@Sendable (Bool) -> Void)?)
+  func sendVideo(fileURL: URL, caption: String, keyboard: TelegramKeyboard, completion: (@Sendable (Bool) -> Void)?)
 }
 
 extension NotificationService {
@@ -21,6 +22,11 @@ extension NotificationService {
   }
 
   func sendPhoto(jpeg: Data, caption: String, keyboard: TelegramKeyboard,
+                 completion: (@Sendable (Bool) -> Void)?) {
+    completion?(false)
+  }
+
+  func sendVideo(fileURL: URL, caption: String, keyboard: TelegramKeyboard,
                  completion: (@Sendable (Bool) -> Void)?) {
     completion?(false)
   }
@@ -102,7 +108,7 @@ final class TelegramService: NotificationService {
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-    request.httpBody = MultipartBody.make(boundary: boundary, fields: fields, jpeg: jpeg,
+    request.httpBody = MultipartBody.make(boundary: boundary, fields: fields, fileData: jpeg,
                                           fieldName: "photo", filename: "lidguard.jpg")
 
     NetworkRetry.send(
@@ -112,6 +118,53 @@ final class TelegramService: NotificationService {
       logCategory: .telegram,
       completion: completion
     )
+  }
+
+  func sendVideo(fileURL: URL, caption: String, keyboard: TelegramKeyboard = .none,
+                 completion: (@Sendable (Bool) -> Void)? = nil) {
+    guard Config.Telegram.isConfigured && Config.Telegram.isEnabled,
+          let botToken = Config.Telegram.botToken,
+          let chatId = Config.Telegram.chatId,
+          let url = URL(string: "https://api.telegram.org/bot\(botToken)/sendVideo") else {
+      completion?(false)
+      return
+    }
+
+    let boundary = "LidGuard-\(UUID().uuidString)"
+    var fields: [(String, String)] = [
+      ("chat_id", chatId),
+      ("caption", caption),
+      ("parse_mode", "HTML")
+    ]
+    if let markup = buildKeyboard(keyboard),
+       let markupData = try? JSONSerialization.data(withJSONObject: markup),
+       let markupString = String(data: markupData, encoding: .utf8) {
+      fields.append(("reply_markup", markupString))
+    }
+
+    let session = self.session
+    let postFields = fields   // immutable copy for the concurrent closure
+    // Read the clip off the main actor (a few MB) before posting.
+    DispatchQueue.global(qos: .utility).async {
+      guard let data = try? Data(contentsOf: fileURL) else {
+        completion?(false)
+        return
+      }
+      var request = URLRequest(url: url)
+      request.httpMethod = "POST"
+      request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+      request.httpBody = MultipartBody.make(boundary: boundary, fields: postFields, fileData: data,
+                                            fieldName: "video", filename: "lidguard.mov",
+                                            contentType: "video/quicktime")
+
+      NetworkRetry.send(
+        request: request,
+        session: session,
+        logger: Logger.telegram,
+        logCategory: .telegram,
+        completion: completion
+      )
+    }
   }
 
   private func buildKeyboard(_ keyboard: TelegramKeyboard) -> [String: Any]? {

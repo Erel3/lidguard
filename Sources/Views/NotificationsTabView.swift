@@ -12,8 +12,10 @@ struct NotificationsTabView: View {
   @Binding var trackWiFi: Bool
   @Binding var trackBattery: Bool
   @Binding var trackDeviceName: Bool
+  @Binding var photoCaptureEnabled: Bool
   var isDaemonConnected: Bool
   var onConnect: () -> Void
+  var onPhotoCaptureEnabled: (() -> Void)?
 
   var body: some View {
     Form {
@@ -74,6 +76,10 @@ struct NotificationsTabView: View {
         Toggle("WiFi name", isOn: $trackWiFi)
         Toggle("Battery level", isOn: $trackBattery)
         Toggle("Device name", isOn: $trackDeviceName)
+        Toggle("Capture thief photos", isOn: $photoCaptureEnabled)
+          .onChange(of: photoCaptureEnabled) { _, newValue in
+            if newValue { onPhotoCaptureEnabled?() }
+          }
       } header: {
         Text("Tracking Data")
       } footer: {

@@ -1,3 +1,4 @@
+import AVFoundation
 import Contacts
 import SwiftUI
 
@@ -75,6 +76,7 @@ struct SettingsView: View {
   @State private var trackWiFi: Bool = true
   @State private var trackBattery: Bool = true
   @State private var trackDeviceName: Bool = true
+  @State private var photoCaptureEnabled: Bool = false
   @State private var verificationController: TelegramVerificationWindowController?
 
   @State private var isDaemonConnected = false
@@ -87,6 +89,7 @@ struct SettingsView: View {
   @State private var isCheckingForHelperUpdates = false
   @State private var selectedSection: SettingsSection? = .general
   @State private var showingResetConfirmation = false
+  @State private var showCameraDenied = false
   @Environment(\.dismiss) private var dismiss
 
   private let alarmSounds = [
@@ -160,6 +163,11 @@ struct SettingsView: View {
       }
     } message: {
       Text("This will clear all stored credentials and preferences.")
+    }
+    .alert("Camera Access Required", isPresented: $showCameraDenied) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text("Camera permission is required to capture thief photos. Enable it in System Settings → Privacy & Security → Camera.")
     }
     .toolbar {
       ToolbarItem(placement: .cancellationAction) {
@@ -280,8 +288,10 @@ struct SettingsView: View {
       trackWiFi: $trackWiFi,
       trackBattery: $trackBattery,
       trackDeviceName: $trackDeviceName,
+      photoCaptureEnabled: $photoCaptureEnabled,
       isDaemonConnected: isDaemonConnected,
-      onConnect: { connectTelegram() }
+      onConnect: { connectTelegram() },
+      onPhotoCaptureEnabled: { primeCameraAccess() }
     )
   }
 
@@ -324,6 +334,7 @@ struct SettingsView: View {
     trackWiFi = settings.trackWiFi
     trackBattery = settings.trackBattery
     trackDeviceName = settings.trackDeviceName
+    photoCaptureEnabled = settings.photoCaptureEnabled
   }
 
   private func saveSettings() {
@@ -371,6 +382,7 @@ struct SettingsView: View {
     settings.trackWiFi = trackWiFi
     settings.trackBattery = trackBattery
     settings.trackDeviceName = trackDeviceName
+    settings.photoCaptureEnabled = photoCaptureEnabled
 
     settings.autoUpdateEnabled = autoUpdateEnabled
     if autoUpdateEnabled {
@@ -444,6 +456,23 @@ struct SettingsView: View {
       DispatchQueue.main.async {
         isInstallingHelper = false
         helperInstallResult = success
+      }
+    }
+  }
+
+  private func primeCameraAccess() {
+    // Already authorized → nothing to prime. Also stops loadSettings()'s programmatic
+    // toggle-restore from re-requesting (and false-alerting) every time settings open.
+    guard CameraCaptureService.shared.authorizationStatus() != .authorized else { return }
+    CameraCaptureService.shared.requestAccess { granted in
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          if !granted {
+            photoCaptureEnabled = false
+            settings.photoCaptureEnabled = false
+            showCameraDenied = true
+          }
+        }
       }
     }
   }

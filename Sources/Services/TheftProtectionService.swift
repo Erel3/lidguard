@@ -539,7 +539,7 @@ final class TheftProtectionService {
           let id = UUID().uuidString
           guard let filename = self.outbox.storePhoto(data, id: id) else { return }
           self.outbox.enqueue(OutboxItem(id: id, timestamp: Date(), kind: .photo, snapshot: nil,
-                                         renderedMessage: caption, photoFilename: filename))
+                                         renderedMessage: caption, mediaFilename: filename))
           ActivityLog.logAsync(.theft, "Thief photo captured")
           self.flushOutbox()
         }

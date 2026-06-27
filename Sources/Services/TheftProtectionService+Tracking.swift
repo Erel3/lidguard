@@ -59,7 +59,7 @@ extension TheftProtectionService {
       kind: type == .initial ? .initialUpdate : .trackingUpdate,
       snapshot: DeviceSnapshot(info),
       renderedMessage: prefix + info.formattedMessage,
-      photoFilename: nil
+      mediaFilename: nil
     )
     outbox.enqueue(item)
     flushOutbox()
@@ -111,7 +111,7 @@ extension TheftProtectionService {
     guard !items.isEmpty else { return }
     let keyboard: TelegramKeyboard = AlarmAudioManager.shared.isPlaying ? .theftModeAlarmOn : .theftMode
     for item in items {
-      guard let data = outbox.photoData(for: item) else { outbox.remove(ids: [item.id]); continue }
+      guard let data = outbox.mediaData(for: item) else { outbox.remove(ids: [item.id]); continue }
       inFlightPhotoIDs.insert(item.id)
       let caption = item.renderedMessage ?? "🕵️ Thief photo"
       let episode = theftEpisodeId

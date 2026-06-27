@@ -100,37 +100,57 @@ extension TheftProtectionService {
     }
   }
 
+  /// Drains queued media ONE AT A TIME, oldest first, with a gap between uploads so a
+  /// backlog doesn't burst-send and trip Telegram's rate limit. On a send failure the item
+  /// stays queued and draining stops; the next tracking tick re-attempts.
   func flushMedia(ids: [String]) {
-    guard state == .theftMode else { return }
-    // Send oldest→newest of the capped set; skip media already in flight; remove on success.
-    let items = outbox.items
-      .filter { ids.contains($0.id) && ($0.kind == .photo || $0.kind == .video) && !inFlightMediaIDs.contains($0.id) }
+    guard state == .theftMode, !isSendingMedia else { return }
+    sendNextMedia(remaining: ids)
+  }
+
+  private func sendNextMedia(remaining: [String]) {
+    guard state == .theftMode else { isSendingMedia = false; return }
+    let queued = outbox.items
+      .filter { remaining.contains($0.id) && ($0.kind == .photo || $0.kind == .video) }
       .sorted { $0.timestamp < $1.timestamp }
-    guard !items.isEmpty else { return }
+    guard let item = queued.first else { isSendingMedia = false; return }
+    let rest = remaining.filter { $0 != item.id }
+    isSendingMedia = true
+
     let keyboard: TelegramKeyboard = AlarmAudioManager.shared.isPlaying ? .theftModeAlarmOn : .theftMode
-    for item in items {
-      let caption = item.renderedMessage ?? "🕵️ Thief media"
-      let episode = theftEpisodeId
-      let onResult: @Sendable (Bool) -> Void = { [weak self] success in
-        DispatchQueue.main.async {
-          MainActor.assumeIsolated {
-            guard let self else { return }
-            self.inFlightMediaIDs.remove(item.id)
-            guard self.state == .theftMode, self.theftEpisodeId == episode else { return }
-            if success { self.outbox.remove(ids: [item.id]) }
+    let caption = item.renderedMessage ?? "🕵️ Thief media"
+    let episode = theftEpisodeId
+    let onResult: @Sendable (Bool) -> Void = { [weak self] success in
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          // Stale completion (disarmed / new episode): just bail. activate/deactivate already
+          // reset isSendingMedia, so don't clobber a live new-episode drain's flag here.
+          guard self.state == .theftMode, self.theftEpisodeId == episode else { return }
+          if success {
+            self.outbox.remove(ids: [item.id])
+            // Pace the next upload to stay under the rate limit.
+            DispatchQueue.main.asyncAfter(deadline: .now() + TheftProtectionService.mediaSendGap) { [weak self] in
+              MainActor.assumeIsolated { self?.sendNextMedia(remaining: rest) }
+            }
+          } else {
+            self.isSendingMedia = false   // leave queued; next tracking tick retries
           }
         }
       }
-      if item.kind == .video {
-        guard let fileURL = outbox.mediaFileURL(for: item),
-              FileManager.default.fileExists(atPath: fileURL.path) else { outbox.remove(ids: [item.id]); continue }
-        inFlightMediaIDs.insert(item.id)
-        notificationService.sendVideo(fileURL: fileURL, caption: caption, keyboard: keyboard, completion: onResult)
-      } else {
-        guard let data = outbox.mediaData(for: item) else { outbox.remove(ids: [item.id]); continue }
-        inFlightMediaIDs.insert(item.id)
-        notificationService.sendPhoto(jpeg: data, caption: caption, keyboard: keyboard, completion: onResult)
+    }
+
+    if item.kind == .video {
+      guard let fileURL = outbox.mediaFileURL(for: item),
+            FileManager.default.fileExists(atPath: fileURL.path) else {
+        outbox.remove(ids: [item.id]); sendNextMedia(remaining: rest); return
       }
+      notificationService.sendVideo(fileURL: fileURL, caption: caption, keyboard: keyboard, completion: onResult)
+    } else {
+      guard let data = outbox.mediaData(for: item) else {
+        outbox.remove(ids: [item.id]); sendNextMedia(remaining: rest); return
+      }
+      notificationService.sendPhoto(jpeg: data, caption: caption, keyboard: keyboard, completion: onResult)
     }
   }
 

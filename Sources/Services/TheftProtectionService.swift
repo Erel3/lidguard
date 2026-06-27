@@ -58,7 +58,10 @@ final class TheftProtectionService {
   let theftStateStore = TheftStateStore(directory: AppPaths.supportDirectory)
   let outbox = TrackingOutbox(directory: AppPaths.supportDirectory)
   var isFlushingOutbox = false
-  var inFlightMediaIDs: Set<String> = []
+  var isSendingMedia = false
+  /// Min gap between media uploads — keeps under Telegram's ~1 msg/s per-chat limit so a
+  /// burst doesn't self-inflict 429 throttling (which the offline siren misreads as "offline").
+  static let mediaSendGap: TimeInterval = 1.2
 
   var lastManualDisarmTime: Date?
   var lastArmTime: Date?
@@ -395,7 +398,7 @@ final class TheftProtectionService {
     updateCount = 0
     theftEpisodeId &+= 1
     outbox.clear()  // fresh incident — discard any leftovers from a prior episode
-    inFlightMediaIDs.removeAll()
+    isSendingMedia = false
     isFlushingOutbox = false
     bleAutoDisarmArmed = false
     suppressedLidClose = false
@@ -445,7 +448,7 @@ final class TheftProtectionService {
     stateBeforeTheft = nil
     theftStateStore.clear()
     outbox.clear()  // incident closed by owner — drop undelivered queue + photo sidecars
-    inFlightMediaIDs.removeAll()
+    isSendingMedia = false
     isFlushingOutbox = false
     stopTracking()
     updateCount = 0

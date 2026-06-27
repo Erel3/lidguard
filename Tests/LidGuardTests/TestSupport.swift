@@ -13,15 +13,27 @@ enum TestSupport {
 }
 
 /// Records sends and lets a test drive success/failure for `NotificationService`.
-/// `sendPhoto` is supplied by the protocol's default extension once it exists; if a
-/// test needs to assert photo sends, override it here.
 @MainActor
 final class FakeNotifier: NotificationService {
   private(set) var sentMessages: [String] = []
+  private(set) var sentPhotoCount = 0
+  private(set) var sentVideoURLs: [URL] = []
   var nextResult = true
 
   func send(message: String, keyboard: TelegramKeyboard, completion: (@Sendable (Bool) -> Void)?) {
     sentMessages.append(message)
+    completion?(nextResult)
+  }
+
+  func sendPhoto(jpeg: Data, caption: String, keyboard: TelegramKeyboard,
+                 completion: (@Sendable (Bool) -> Void)?) {
+    sentPhotoCount += 1
+    completion?(nextResult)
+  }
+
+  func sendVideo(fileURL: URL, caption: String, keyboard: TelegramKeyboard,
+                 completion: (@Sendable (Bool) -> Void)?) {
+    sentVideoURLs.append(fileURL)
     completion?(nextResult)
   }
 }

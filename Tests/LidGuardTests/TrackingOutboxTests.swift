@@ -21,7 +21,7 @@ final class TrackingOutboxTests: XCTestCase {
   ) -> OutboxItem {
     OutboxItem(id: id, timestamp: timestamp, kind: kind,
                snapshot: nil, renderedMessage: "msg-\(id)",
-               photoFilename: nil)
+               mediaFilename: nil)
   }
 
   // MARK: - Enqueue + persist
@@ -71,13 +71,13 @@ final class TrackingOutboxTests: XCTestCase {
     let filename = outbox.storePhoto(jpeg, id: id)
     XCTAssertNotNil(filename)
     var item = makeItem(id: id, kind: .photo)
-    item.photoFilename = filename
-    XCTAssertEqual(outbox.photoData(for: item), jpeg)
+    item.mediaFilename = filename
+    XCTAssertEqual(outbox.mediaData(for: item), jpeg)
   }
 
   func testPhotoDataNilForItemWithoutFilename() {
     let item = makeItem(id: "t1", kind: .trackingUpdate)
-    XCTAssertNil(outbox.photoData(for: item))
+    XCTAssertNil(outbox.mediaData(for: item))
   }
 
   // MARK: - Clear
@@ -87,7 +87,7 @@ final class TrackingOutboxTests: XCTestCase {
     let jpeg = Data([0xFF, 0xD8])
     let filename = outbox.storePhoto(jpeg, id: id)!
     var item = makeItem(id: id, kind: .photo)
-    item.photoFilename = filename
+    item.mediaFilename = filename
     outbox.enqueue(item)
     outbox.clear()
     XCTAssertEqual(outbox.count, 0)
@@ -117,7 +117,7 @@ final class TrackingOutboxTests: XCTestCase {
     let id = "keep-me"
     let filename = outbox.storePhoto(jpeg, id: id)!
     var item = makeItem(id: id, kind: .photo)
-    item.photoFilename = filename
+    item.mediaFilename = filename
     outbox.enqueue(item)
     // Reload — reconcile must NOT delete the referenced sidecar.
     _ = TrackingOutbox(directory: dir)
@@ -125,5 +125,33 @@ final class TrackingOutboxTests: XCTestCase {
       FileManager.default.fileExists(atPath: dir.appendingPathComponent(filename).path),
       "Referenced sidecar must survive reconcile"
     )
+  }
+
+  // MARK: - Video sidecar round-trip
+
+  func testStoreVideoRoundTripAndKind() {
+    let dir = TestSupport.makeTempDir()
+    let box = TrackingOutbox(directory: dir)
+    let temp = dir.appendingPathComponent("clip-src.mov")
+    try? Data([0x00, 0x01, 0x02]).write(to: temp)
+    let name = box.storeVideo(from: temp, id: "v1")
+    XCTAssertEqual(name, "v1.mov")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: temp.path),  // moved, not copied
+                   "Source temp file must be gone after storeVideo (move semantics)")
+    let item = OutboxItem(id: "v1", timestamp: Date(), kind: .video, snapshot: nil,
+                          renderedMessage: "cap", mediaFilename: name)
+    box.enqueue(item)
+    XCTAssertEqual(box.mediaData(for: item), Data([0x00, 0x01, 0x02]))
+    XCTAssertEqual(box.mediaFileURL(for: item)?.lastPathComponent, "v1.mov")
+  }
+
+  func testReconcileSweepsOrphanMov() {
+    let dir = TestSupport.makeTempDir()
+    _ = TrackingOutbox(directory: dir)
+    let stray = dir.appendingPathComponent("orphan.mov")
+    try? Data([0x09]).write(to: stray)
+    _ = TrackingOutbox(directory: dir)   // reconcile on init
+    XCTAssertFalse(FileManager.default.fileExists(atPath: stray.path),
+                   "Orphan .mov must be swept on reconcile")
   }
 }

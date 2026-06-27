@@ -13,13 +13,13 @@ final class OutboxFlushTests: XCTestCase {
   ) -> OutboxItem {
     OutboxItem(id: id, timestamp: timestamp, kind: kind,
                snapshot: snapshot, renderedMessage: renderedMessage,
-               photoFilename: nil)
+               mediaFilename: nil)
   }
 
   private func photoItem(id: String, timestamp: Date = Date()) -> OutboxItem {
     OutboxItem(id: id, timestamp: timestamp, kind: .photo,
                snapshot: nil, renderedMessage: nil,
-               photoFilename: "\(id).jpg")
+               mediaFilename: "\(id).jpg")
   }
 
   private func minimalSnap(timestamp: Date = Date()) -> DeviceSnapshot {
@@ -109,5 +109,16 @@ final class OutboxFlushTests: XCTestCase {
     XCTAssertEqual(plan.textItemIDs, ["text1"])
     XCTAssertEqual(plan.photoItemIDs, ["photo1"])
     XCTAssertEqual(plan.photoDropIDs, [])
+  }
+
+  // MARK: - Video treated as media, not text
+
+  func testVideoCountsAsMediaNotText() {
+    let video = OutboxItem(id: "v", timestamp: Date(timeIntervalSince1970: 1), kind: .video,
+                           snapshot: nil, renderedMessage: "cap", mediaFilename: "v.mov")
+    let plan = OutboxFlush.plan(items: [video], photoCap: 3)
+    XCTAssertNil(plan.message)                  // no text to send
+    XCTAssertTrue(plan.textItemIDs.isEmpty)
+    XCTAssertEqual(plan.photoItemIDs, ["v"])    // routed as media
   }
 }

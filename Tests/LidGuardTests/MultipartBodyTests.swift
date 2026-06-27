@@ -12,7 +12,7 @@ final class MultipartBodyTests: XCTestCase {
     fieldName: String = "photo"
   ) -> Data {
     MultipartBody.make(boundary: boundary, fields: fields,
-                       jpeg: jpegData, fieldName: fieldName, filename: filename)
+                       fileData: jpegData, fieldName: fieldName, filename: filename)
   }
 
   /// Search for a UTF-8 string as a byte subsequence inside the body Data.
@@ -73,5 +73,19 @@ final class MultipartBodyTests: XCTestCase {
     let b = makeBody()
     XCTAssertNotNil(b.range(of: jpegData),
                     "Raw JPEG bytes must appear verbatim in the multipart body")
+  }
+
+  // MARK: - Video field
+
+  func testVideoFieldAndFilename() {
+    let bytes = Data([0x00, 0x00, 0x00, 0x18])
+    let body = MultipartBody.make(boundary: "B", fields: [("chat_id", "1")],
+                                  fileData: bytes, fieldName: "video", filename: "lidguard.mov",
+                                  contentType: "video/quicktime")
+    let text = String(decoding: body, as: UTF8.self)
+    XCTAssertTrue(text.contains("name=\"video\""), "Video field name must be 'video'")
+    XCTAssertTrue(text.contains("filename=\"lidguard.mov\""), "Filename must be lidguard.mov")
+    XCTAssertTrue(text.contains("video/quicktime"), "Content-Type must be video/quicktime")
+    XCTAssertNotNil(body.range(of: bytes), "Raw video bytes must appear verbatim")
   }
 }

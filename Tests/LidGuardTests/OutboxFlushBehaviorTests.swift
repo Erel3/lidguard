@@ -26,7 +26,7 @@ final class OutboxFlushBehaviorTests: XCTestCase {
     )
     return OutboxItem(id: id, timestamp: timestamp, kind: .trackingUpdate,
                       snapshot: snap, renderedMessage: "update-\(id)",
-                      photoFilename: nil)
+                      mediaFilename: nil)
   }
 
   // MARK: - Successful flush drains the queue
@@ -81,7 +81,7 @@ final class OutboxFlushBehaviorTests: XCTestCase {
       kind: .trackingUpdate,
       snapshot: nil,
       renderedMessage: "📍 Location: 37.5, -122.3",
-      photoFilename: nil
+      mediaFilename: nil
     )
     outbox.enqueue(item)
 

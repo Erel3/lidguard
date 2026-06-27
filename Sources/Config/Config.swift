@@ -46,7 +46,7 @@ enum Config {
     static let port: UInt16 = 51423
     static let reconnectBaseDelay: TimeInterval = 2
     static let reconnectMaxDelay: TimeInterval = 30
-    static let minHelperVersion = "1.2.0"
+    static let minHelperVersion = "1.2.4"
     static let helperInstallDir = "Library/Application Support/LidGuard"
     static let helperBinaryName = "lidguard-helper"
     static let helperReleasesURL = "https://api.github.com/repos/Erel3/lidguard-helper/releases/latest"

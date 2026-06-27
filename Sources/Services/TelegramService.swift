@@ -12,11 +12,17 @@ enum TelegramKeyboard: Sendable {
 @MainActor
 protocol NotificationService {
   func send(message: String, keyboard: TelegramKeyboard, completion: (@Sendable (Bool) -> Void)?)
+  func sendPhoto(jpeg: Data, caption: String, keyboard: TelegramKeyboard, completion: (@Sendable (Bool) -> Void)?)
 }
 
 extension NotificationService {
   func send(message: String, completion: (@Sendable (Bool) -> Void)?) {
     send(message: message, keyboard: .none, completion: completion)
+  }
+
+  func sendPhoto(jpeg: Data, caption: String, keyboard: TelegramKeyboard,
+                 completion: (@Sendable (Bool) -> Void)?) {
+    completion?(false)
   }
 }
 
@@ -58,6 +64,46 @@ final class TelegramService: NotificationService {
     }
 
     request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+    NetworkRetry.send(
+      request: request,
+      session: session,
+      logger: Logger.telegram,
+      logCategory: .telegram,
+      completion: completion
+    )
+  }
+
+  func sendPhoto(jpeg: Data, caption: String, keyboard: TelegramKeyboard = .none,
+                 completion: (@Sendable (Bool) -> Void)? = nil) {
+    guard Config.Telegram.isConfigured && Config.Telegram.isEnabled,
+          let botToken = Config.Telegram.botToken,
+          let chatId = Config.Telegram.chatId else {
+      completion?(false)
+      return
+    }
+    guard let url = URL(string: "https://api.telegram.org/bot\(botToken)/sendPhoto") else {
+      completion?(false)
+      return
+    }
+
+    let boundary = "LidGuard-\(UUID().uuidString)"
+    var fields: [(String, String)] = [
+      ("chat_id", chatId),
+      ("caption", caption),
+      ("parse_mode", "HTML")
+    ]
+    if let markup = buildKeyboard(keyboard),
+       let markupData = try? JSONSerialization.data(withJSONObject: markup),
+       let markupString = String(data: markupData, encoding: .utf8) {
+      fields.append(("reply_markup", markupString))
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+    request.httpBody = MultipartBody.make(boundary: boundary, fields: fields, jpeg: jpeg,
+                                          fieldName: "photo", filename: "lidguard.jpg")
 
     NetworkRetry.send(
       request: request,

@@ -57,8 +57,6 @@ final class TheftProtectionService {
   let camera: CameraCapturing = CameraCaptureService.shared
   let theftStateStore = TheftStateStore(directory: AppPaths.supportDirectory)
   let outbox = TrackingOutbox(directory: AppPaths.supportDirectory)
-  /// Max photos sent on a single reconnect/backlog flush; older queued photos are dropped.
-  static let reconnectPhotoCap = 3
   var isFlushingOutbox = false
   var inFlightMediaIDs: Set<String> = []
 

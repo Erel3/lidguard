@@ -66,15 +66,14 @@ extension TheftProtectionService {
   }
 
   /// Sends one text message (single rendered or coalesced summary) for the queued
-  /// text items, then the newest photos (cap), removing each on success. On failure
-  /// items remain queued and the offline siren is scheduled.
+  /// text items, then ALL queued media (none dropped), removing each on success. On
+  /// failure items remain queued and the offline siren is scheduled.
   func flushOutbox() {
     guard state == .theftMode, !isFlushingOutbox else { return }
-    let plan = OutboxFlush.plan(items: outbox.items, photoCap: TheftProtectionService.reconnectPhotoCap)
-    outbox.remove(ids: plan.photoDropIDs)   // drop stale photos beyond the cap
+    let plan = OutboxFlush.plan(items: outbox.items)
 
     guard let message = plan.message else {
-      flushMedia(ids: plan.photoItemIDs)
+      flushMedia(ids: plan.mediaItemIDs)
       return
     }
 
@@ -91,7 +90,7 @@ extension TheftProtectionService {
             self.outbox.remove(ids: plan.textItemIDs)
             self.telegramSucceededInTheftMode = true
             self.cancelOfflineSirenTimer()
-            self.flushMedia(ids: plan.photoItemIDs)
+            self.flushMedia(ids: plan.mediaItemIDs)
             self.flushOutbox()  // deliver anything enqueued during the in-flight send
           } else {
             self.scheduleOfflineSiren()

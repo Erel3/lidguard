@@ -37,7 +37,7 @@ final class OutboxFlushBehaviorTests: XCTestCase {
     outbox.enqueue(i1)
     outbox.enqueue(i2)
 
-    let plan = OutboxFlush.plan(items: outbox.items, photoCap: 0)
+    let plan = OutboxFlush.plan(items: outbox.items)
     XCTAssertNotNil(plan.message, "Plan must produce a message for 2 queued items")
     XCTAssertTrue(plan.message!.contains("OFFLINE SUMMARY"),
                   "Two items must produce a coalesced summary, got: \(plan.message!)")
@@ -61,7 +61,7 @@ final class OutboxFlushBehaviorTests: XCTestCase {
     outbox.enqueue(i1)
     outbox.enqueue(i2)
 
-    let plan = OutboxFlush.plan(items: outbox.items, photoCap: 0)
+    let plan = OutboxFlush.plan(items: outbox.items)
 
     // Simulate failed send: notifier returns false → do NOT remove items.
     notifier.nextResult = false
@@ -85,7 +85,7 @@ final class OutboxFlushBehaviorTests: XCTestCase {
     )
     outbox.enqueue(item)
 
-    let plan = OutboxFlush.plan(items: outbox.items, photoCap: 0)
+    let plan = OutboxFlush.plan(items: outbox.items)
     XCTAssertEqual(plan.message, "📍 Location: 37.5, -122.3")
 
     notifier.nextResult = true

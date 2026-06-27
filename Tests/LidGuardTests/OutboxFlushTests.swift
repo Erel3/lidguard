@@ -32,7 +32,7 @@ final class OutboxFlushTests: XCTestCase {
 
   func testSingleTextItemUsesRenderedMessage() {
     let item = textItem(id: "t1", renderedMessage: "Hello world!")
-    let plan = OutboxFlush.plan(items: [item], photoCap: 5)
+    let plan = OutboxFlush.plan(items: [item])
     XCTAssertEqual(plan.message, "Hello world!")
     XCTAssertEqual(plan.textItemIDs, ["t1"])
   }
@@ -46,54 +46,44 @@ final class OutboxFlushTests: XCTestCase {
     let i2 = textItem(id: "t2", renderedMessage: "msg2",
                       snapshot: minimalSnap(timestamp: t0.addingTimeInterval(10)),
                       timestamp: t0.addingTimeInterval(10))
-    let plan = OutboxFlush.plan(items: [i1, i2], photoCap: 5)
+    let plan = OutboxFlush.plan(items: [i1, i2])
     XCTAssertNotNil(plan.message)
     XCTAssertTrue(plan.message!.contains("OFFLINE SUMMARY"),
                   "Expected coalesced summary, got: \(plan.message!)")
     XCTAssertEqual(Set(plan.textItemIDs), Set(["t1", "t2"]))
   }
 
-  // MARK: - Photo cap: keep NEWEST photoCap, drop older
+  // MARK: - All media kept (no cap), oldest→newest
 
-  func testPhotoCapsKeepNewest() {
+  func testAllMediaKeptNoneDropped() {
     let p1 = photoItem(id: "p1", timestamp: Date(timeIntervalSince1970: 1))
     let p2 = photoItem(id: "p2", timestamp: Date(timeIntervalSince1970: 2))
     let p3 = photoItem(id: "p3", timestamp: Date(timeIntervalSince1970: 3))
-    let plan = OutboxFlush.plan(items: [p1, p2, p3], photoCap: 2)
-    // Newest 2 kept: p2, p3; oldest dropped: p1
-    XCTAssertEqual(Set(plan.photoItemIDs), Set(["p2", "p3"]))
-    XCTAssertEqual(plan.photoDropIDs, ["p1"])
-  }
-
-  func testPhotoCap0DropsAll() {
-    let p1 = photoItem(id: "p1")
-    let plan = OutboxFlush.plan(items: [p1], photoCap: 0)
-    XCTAssertEqual(plan.photoItemIDs, [])
-    XCTAssertEqual(plan.photoDropIDs, ["p1"])
+    let plan = OutboxFlush.plan(items: [p1, p2, p3])
+    XCTAssertEqual(plan.mediaItemIDs, ["p1", "p2", "p3"])
   }
 
   // MARK: - Empty input
 
   func testEmptyItemsProducesNilMessageAndNoIDs() {
-    let plan = OutboxFlush.plan(items: [], photoCap: 5)
+    let plan = OutboxFlush.plan(items: [])
     XCTAssertNil(plan.message)
     XCTAssertEqual(plan.textItemIDs, [])
-    XCTAssertEqual(plan.photoItemIDs, [])
-    XCTAssertEqual(plan.photoDropIDs, [])
+    XCTAssertEqual(plan.mediaItemIDs, [])
   }
 
   // MARK: - Nil / empty renderedMessage → item NOT consumed
 
   func testNilRenderedMessageNotConsumed() {
     let item = textItem(id: "t1", renderedMessage: nil)
-    let plan = OutboxFlush.plan(items: [item], photoCap: 5)
+    let plan = OutboxFlush.plan(items: [item])
     XCTAssertNil(plan.message)
     XCTAssertEqual(plan.textItemIDs, [], "Nil-message item must not be consumed")
   }
 
   func testEmptyRenderedMessageNotConsumed() {
     let item = textItem(id: "t1", renderedMessage: "")
-    let plan = OutboxFlush.plan(items: [item], photoCap: 5)
+    let plan = OutboxFlush.plan(items: [item])
     XCTAssertNil(plan.message)
     XCTAssertEqual(plan.textItemIDs, [], "Empty-message item must not be consumed")
   }
@@ -104,11 +94,10 @@ final class OutboxFlushTests: XCTestCase {
     let t0 = Date(timeIntervalSince1970: 0)
     let ti = textItem(id: "text1", renderedMessage: "update", timestamp: t0)
     let pi = photoItem(id: "photo1", timestamp: t0.addingTimeInterval(5))
-    let plan = OutboxFlush.plan(items: [ti, pi], photoCap: 1)
+    let plan = OutboxFlush.plan(items: [ti, pi])
     XCTAssertEqual(plan.message, "update")
     XCTAssertEqual(plan.textItemIDs, ["text1"])
-    XCTAssertEqual(plan.photoItemIDs, ["photo1"])
-    XCTAssertEqual(plan.photoDropIDs, [])
+    XCTAssertEqual(plan.mediaItemIDs, ["photo1"])
   }
 
   // MARK: - Video treated as media, not text
@@ -116,9 +105,9 @@ final class OutboxFlushTests: XCTestCase {
   func testVideoCountsAsMediaNotText() {
     let video = OutboxItem(id: "v", timestamp: Date(timeIntervalSince1970: 1), kind: .video,
                            snapshot: nil, renderedMessage: "cap", mediaFilename: "v.mov")
-    let plan = OutboxFlush.plan(items: [video], photoCap: 3)
+    let plan = OutboxFlush.plan(items: [video])
     XCTAssertNil(plan.message)                  // no text to send
     XCTAssertTrue(plan.textItemIDs.isEmpty)
-    XCTAssertEqual(plan.photoItemIDs, ["v"])    // routed as media
+    XCTAssertEqual(plan.mediaItemIDs, ["v"])    // routed as media
   }
 }

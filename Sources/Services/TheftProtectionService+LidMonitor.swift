@@ -17,7 +17,9 @@ extension TheftProtectionService: LidMonitorDelegate {
 
   func lidMonitorDidDetectOpen(_ monitor: LidMonitorService) {
     if state == .theftMode {
-      capturePhotoIfEnabled(caption: "🕵️ <b>Thief photo</b> — lid opened")
+      // Video, not a still: a photo at the instant the lid lifts often catches only the
+      // keyboard; a short clip is far more likely to capture the person.
+      captureVideoIfEnabled(caption: "🎥 <b>Thief video</b> — lid opened")
     }
     suppressedLidClose = false
     Logger.theft.info("Lid opened - theft mode still active")

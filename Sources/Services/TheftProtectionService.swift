@@ -54,6 +54,7 @@ final class TheftProtectionService {
   let daemonClient: DaemonIPC
   private let globalShortcutService = GlobalShortcutService()
   let bluetoothProximityService = BluetoothProximityService()
+  let theftStateStore = TheftStateStore(directory: AppPaths.supportDirectory)
 
   var lastManualDisarmTime: Date?
   var lastArmTime: Date?
@@ -339,6 +340,7 @@ final class TheftProtectionService {
 
     let wasBluetooth = state == .enabledBluetooth
     state = .disabled
+    theftStateStore.clear()
     bleAutoDisarmArmed = false
     suppressedLidClose = false
     // Only set cooldown for genuine manual disarms (not bluetooth auto-disarm)
@@ -385,6 +387,7 @@ final class TheftProtectionService {
     stateBeforeTheft = state
     state = .theftMode
     currentTrigger = trigger
+    theftStateStore.save(TheftStateRecord(state: "theftMode", trigger: trigger.description, startedAt: Date()))
     updateCount = 0
     theftEpisodeId &+= 1
     bleAutoDisarmArmed = false
@@ -432,6 +435,7 @@ final class TheftProtectionService {
     let restoredState = stateBeforeTheft ?? .enabled
     state = restoredState
     stateBeforeTheft = nil
+    theftStateStore.clear()
     stopTracking()
     updateCount = 0
     currentTrigger = nil
@@ -452,6 +456,49 @@ final class TheftProtectionService {
     )
 
     delegate?.theftProtectionStateDidChange(self, state: restoredState)
+  }
+
+  /// Called once at launch. If the app was killed/powered-off during theft mode,
+  /// re-enter theft mode. Only resumes after a user login (the app launches via
+  /// SMAppService login item) — pre-login resume would need a privileged daemon.
+  func resumeTheftModeIfNeeded() {
+    guard SettingsService.shared.restoreTheftModeEnabled else { return }
+    guard state == .disabled else { return }
+    guard let record = theftStateStore.load(), record.state == "theftMode" else { return }
+
+    stateBeforeTheft = .enabled
+    state = .theftMode
+    currentTrigger = nil
+    updateCount = 0
+    theftEpisodeId &+= 1
+    Logger.theft.warning("THEFT MODE RESUMED after power-off")
+    ActivityLog.logAsync(.theft, "Theft mode resumed after power-off")
+
+    startMonitors()
+
+    let settings = SettingsService.shared
+    if settings.lockScreenOnTheftMode {
+      lockScreen()
+    }
+    if settings.lockScreenOnTheftMode && settings.behaviorLockScreen {
+      let name = settings.contactName ?? ""
+      let phone = settings.contactPhone ?? ""
+      daemonClient.showLockScreen(contactName: name, contactPhone: phone, message: "STOLEN DEVICE")
+    }
+    if settings.behaviorAlarm && settings.behaviorAutoAlarm {
+      AlarmAudioManager.shared.play()
+    }
+
+    telegramSucceededInTheftMode = false
+    notificationService.send(
+      message: "⚠️ <b>DEVICE POWERED BACK ON — THEFT MODE RESUMED</b>\n\nThe device was powered off during theft mode and has just restarted.",
+      keyboard: AlarmAudioManager.shared.isPlaying ? .theftModeAlarmOn : .theftMode,
+      completion: nil
+    )
+
+    sendInitialTheftUpdate()
+    startTracking()
+    delegate?.theftProtectionStateDidChange(self, state: .theftMode)
   }
 
   func refreshLocation() {

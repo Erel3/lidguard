@@ -49,6 +49,7 @@ final class SettingsService {
     case behaviorAutoAlarm = "lidguard.behaviorAutoAlarm"
     case alarmVolume = "lidguard.alarmVolume"
     case offlineSirenEnabled = "lidguard.offlineSirenEnabled"
+    case restoreTheftModeEnabled = "lidguard.restoreTheftModeEnabled"
 
     // Updates
     case autoUpdateEnabled = "lidguard.autoUpdateEnabled"
@@ -250,6 +251,11 @@ final class SettingsService {
   var offlineSirenEnabled: Bool {
     get { defaults.object(forKey: Keys.offlineSirenEnabled.rawValue) as? Bool ?? false }
     set { defaults.set(newValue, forKey: Keys.offlineSirenEnabled.rawValue) }
+  }
+
+  var restoreTheftModeEnabled: Bool {
+    get { defaults.object(forKey: Keys.restoreTheftModeEnabled.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Keys.restoreTheftModeEnabled.rawValue) }
   }
 
   // MARK: - Updates

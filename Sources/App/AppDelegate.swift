@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     statusBar.setup()
     theftProtection.delegate = self
     theftProtection.start()
+    theftProtection.resumeTheftModeIfNeeded()
     statusBar.update(state: theftProtection.state, trigger: theftProtection.currentTrigger)
 
     NotificationCenter.default.addObserver(

@@ -162,9 +162,15 @@ extension CameraCaptureService: AVCapturePhotoCaptureDelegate {
                                didFinishProcessingPhoto photo: AVCapturePhoto,
                                error: Error?) {
     let data = photo.fileDataRepresentation()
+    let outputID = ObjectIdentifier(output)
     DispatchQueue.main.async {
       MainActor.assumeIsolated {
-        CameraCaptureService.shared.finish(error == nil ? data : nil)
+        let svc = CameraCaptureService.shared
+        // Ignore a late delegate whose capture was already finished/superseded
+        // (e.g. the watchdog fired and a newer capture started). Otherwise this
+        // would tear down the newer session and deliver stale bytes to it.
+        guard let current = svc.output, ObjectIdentifier(current) == outputID else { return }
+        svc.finish(error == nil ? data : nil)
       }
     }
   }
@@ -182,9 +188,16 @@ extension CameraCaptureService: AVCaptureFileOutputRecordingDelegate {
     if !succeeded {
       try? FileManager.default.removeItem(at: outputFileURL)   // drop the partial recording
     }
+    let outputID = ObjectIdentifier(output)
     DispatchQueue.main.async {
       MainActor.assumeIsolated {
-        CameraCaptureService.shared.finishVideo(succeeded ? outputFileURL : nil)
+        let svc = CameraCaptureService.shared
+        // Ignore a late delegate for a superseded capture (see photoOutput).
+        guard let current = svc.movieOutput, ObjectIdentifier(current) == outputID else {
+          if succeeded { try? FileManager.default.removeItem(at: outputFileURL) }
+          return
+        }
+        svc.finishVideo(succeeded ? outputFileURL : nil)
       }
     }
   }

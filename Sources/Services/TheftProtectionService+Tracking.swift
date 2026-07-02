@@ -84,11 +84,13 @@ extension TheftProtectionService {
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
           guard let self else { return }
-          self.isFlushingOutbox = false
+          // Bail on a stale completion (disarmed / new episode) BEFORE touching the
+          // flag, so it can't clear a new episode's in-flight flush — mirrors
+          // sendNextMedia's ordering.
           guard self.state == .theftMode, self.theftEpisodeId == episode else { return }
+          self.isFlushingOutbox = false
           if success {
             self.outbox.remove(ids: plan.textItemIDs)
-            self.telegramSucceededInTheftMode = true
             self.cancelOfflineSirenTimer()
             self.flushMedia(ids: plan.mediaItemIDs)
             self.flushOutbox()  // deliver anything enqueued during the in-flight send
@@ -155,9 +157,12 @@ extension TheftProtectionService {
   }
 
   fileprivate func scheduleOfflineSiren() {
+    // Fires whenever Telegram is CURRENTLY unreachable — including after the
+    // device goes dark mid-episode. A successful send cancels the timer
+    // (cancelOfflineSirenTimer), so this reflects live reachability, not whether
+    // we ever reached Telegram this episode.
     let settings = SettingsService.shared
-    guard settings.offlineSirenEnabled, settings.behaviorAlarm,
-          !telegramSucceededInTheftMode else { return }
+    guard settings.offlineSirenEnabled, settings.behaviorAlarm else { return }
     guard offlineSirenTimer == nil else { return }
     let timer = DispatchSource.makeTimerSource(queue: .main)
     timer.schedule(deadline: .now() + 10)

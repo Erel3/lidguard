@@ -44,8 +44,10 @@ final class TrackingOutbox {
   /// Writes JPEG bytes to `<id>.jpg`; returns the filename to store on the item.
   func storePhoto(_ data: Data, id: String) -> String? {
     let filename = "\(id).jpg"
+    let url = directory.appendingPathComponent(filename)
     do {
-      try data.write(to: directory.appendingPathComponent(filename), options: .atomic)
+      try data.write(to: url, options: .atomic)
+      restrictPermissions(url)
       return filename
     } catch {
       return nil
@@ -59,6 +61,7 @@ final class TrackingOutbox {
     do {
       try? FileManager.default.removeItem(at: dest)
       try FileManager.default.moveItem(at: tempURL, to: dest)
+      restrictPermissions(dest)
       return filename
     } catch {
       try? FileManager.default.removeItem(at: tempURL)   // don't leak the temp recording
@@ -116,6 +119,13 @@ final class TrackingOutbox {
   private func persist() {
     guard let data = try? JSONEncoder().encode(items) else { return }
     try? data.write(to: indexURL, options: .atomic)
+    restrictPermissions(indexURL)
+  }
+
+  /// Owner-only (0600) — this file holds location/IP/WiFi + thief media on disk
+  /// while an incident's deliveries are queued.
+  private func restrictPermissions(_ url: URL) {
+    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
   }
 
   private static func loadIndex(_ url: URL) -> [OutboxItem] {

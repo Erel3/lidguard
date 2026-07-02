@@ -65,11 +65,15 @@ final class SystemInfoService: SystemInfoProvider {
   }
 
   private func getBatteryInfo() -> (level: Int, isCharging: Bool)? {
-    let snapshot = IOPSCopyPowerSourcesInfo().takeRetainedValue()
-    let sources = IOPSCopyPowerSourcesList(snapshot).takeRetainedValue() as Array
+    // `IOPSCopy*` are imported as implicitly-unwrapped optionals but can return
+    // nil transiently; force-unwrapping traps. This runs on every theft-mode
+    // tracking tick, so a trap here would kill the app mid-theft. Guard instead.
+    guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+          let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
+    else { return nil }
 
     for source in sources {
-      guard let desc = IOPSGetPowerSourceDescription(snapshot, source).takeUnretainedValue() as? [String: Any],
+      guard let desc = IOPSGetPowerSourceDescription(snapshot, source)?.takeUnretainedValue() as? [String: Any],
             let capacity = desc[kIOPSCurrentCapacityKey] as? Int,
             let isCharging = desc[kIOPSIsChargingKey] as? Bool else { continue }
       return (capacity, isCharging)

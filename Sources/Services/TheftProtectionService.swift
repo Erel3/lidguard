@@ -70,7 +70,6 @@ final class TheftProtectionService {
   private(set) var currentTrigger: TheftTrigger?
   private var stateBeforeTheft: ProtectionState?
   var offlineSirenTimer: DispatchSourceTimer?
-  var telegramSucceededInTheftMode = false
   private var helperInstallGeneration = 0
   var theftEpisodeId = 0
   var bleAutoDisarmArmed = false
@@ -426,7 +425,6 @@ final class TheftProtectionService {
     }
 
     // Offline siren: if Telegram not available, play siren immediately
-    telegramSucceededInTheftMode = false
     if settings.offlineSirenEnabled && settings.behaviorAlarm
        && (!Config.Telegram.isConfigured || !Config.Telegram.isEnabled) {
       AlarmAudioManager.shared.play()
@@ -455,7 +453,6 @@ final class TheftProtectionService {
     currentTrigger = nil
     AlarmAudioManager.shared.stop()
     cancelOfflineSirenTimer()
-    telegramSucceededInTheftMode = false
     daemonClient.hideLockScreen()
     recalibrateMotion()  // laptop may have been repositioned during theft
     Logger.theft.info("Theft mode deactivated")
@@ -505,7 +502,6 @@ final class TheftProtectionService {
       AlarmAudioManager.shared.play()
     }
 
-    telegramSucceededInTheftMode = false
     // Mirror activateTheftMode: if Telegram is unavailable, play the siren immediately.
     if settings.offlineSirenEnabled && settings.behaviorAlarm
        && (!Config.Telegram.isConfigured || !Config.Telegram.isEnabled) {

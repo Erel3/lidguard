@@ -36,10 +36,15 @@ enum HelperInstaller {
 
       let pkgPath = tempDir.appendingPathComponent(asset.name)
       try await downloadFile(from: downloadURL, to: pkgPath)
-      try await verifyPkgSignature(at: pkgPath)
 
       await unloadDaemon()
       try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+      // Verify the signature as the LAST step before the privileged install so a
+      // same-user process can't swap the PKG in the gap between check and use —
+      // the unload + 1s sleep above was previously a TOCTOU window between the
+      // verify and the installer opening the same path.
+      try await verifyPkgSignature(at: pkgPath)
 
       // Path passed as argv[1] — never interpolated into the shell command body.
       // `quoted form of` produces shell-safe single-quoted form, blocking $(),
@@ -97,7 +102,13 @@ enum HelperInstaller {
                     userInfo: [NSLocalizedDescriptionKey: "PKG signature invalid"])
     }
     let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    guard out.contains("(\(Config.App.teamID))") else {
+    // Pin the team ID to the *trailing* parenthesized identifier of the
+    // "Developer ID Installer: <Name> (<TeamID>)" leaf line — not a bare
+    // substring of pkgutil's output. A substring match is spoofable by a cert
+    // whose Apple-registered name embeds "(<TeamID>)" while being signed under a
+    // different team; anchoring to end-of-line defeats that.
+    let leafPattern = #"(?m)^\s*(?:\d+\.\s+)?Developer ID Installer:.*\(\#(Config.App.teamID)\)\s*$"#
+    guard out.range(of: leafPattern, options: .regularExpression) != nil else {
       throw NSError(domain: "HelperInstall", code: 3,
                     userInfo: [NSLocalizedDescriptionKey: "PKG not signed by expected team ID"])
     }

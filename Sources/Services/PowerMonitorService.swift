@@ -19,7 +19,7 @@ final class PowerMonitorService {
     // Initialize state BEFORE adding the runloop source. If the source
     // fires synchronously during CFRunLoopAddSource, a nil `wasCharging`
     // would drop a legitimate disconnect on the first tick.
-    let charging = isCharging()
+    let charging = readACConnected()
     wasCharging = charging
 
     let context = Unmanaged.passUnretained(self).toOpaque()
@@ -39,7 +39,7 @@ final class PowerMonitorService {
     if !hasBattery {
       Logger.power.info("No battery detected — power-disconnect trigger inactive")
     }
-    Logger.power.info("Started (charging: \(charging))")
+    Logger.power.info("Started (AC: \(charging.map(String.init) ?? "unknown"))")
   }
 
   func stop() {
@@ -52,7 +52,11 @@ final class PowerMonitorService {
   }
 
   private func checkPowerState() {
-    let charging = isCharging()
+    // A transient IOKit read failure returns nil — do NOT treat that as "on
+    // battery", or an unreadable sample fabricates a disconnect and fires a
+    // false theft trigger (siren + "STOLEN" alerts). Skip the tick instead,
+    // mirroring LidMonitorService's transient-failure handling.
+    guard let charging = readACConnected() else { return }
     defer { wasCharging = charging }
 
     // Detect disconnect: was charging → not charging
@@ -62,10 +66,12 @@ final class PowerMonitorService {
     }
   }
 
-  func isCharging() -> Bool {
+  /// True = on AC, false = on battery, nil = power state unreadable this tick.
+  /// Callers must not coerce nil to a concrete state.
+  private func readACConnected() -> Bool? {
     guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
           let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [Any]
-    else { return false }
+    else { return nil }
 
     guard let source = sources.first,
           let info = IOPSGetPowerSourceDescription(snapshot, source as CFTypeRef)?
@@ -78,4 +84,7 @@ final class PowerMonitorService {
 
     return info[kIOPSPowerSourceStateKey] as? String == kIOPSACPowerValue
   }
+
+  /// Display/status convenience: unreadable is reported as not-on-AC.
+  func isCharging() -> Bool { readACConnected() ?? false }
 }

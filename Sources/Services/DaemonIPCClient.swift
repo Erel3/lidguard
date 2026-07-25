@@ -44,6 +44,9 @@ final class DaemonIPCClient: DaemonIPC, @unchecked Sendable {
   private var pendingCommands: [IPCCommand] = []
   private var hasLoggedConnectionRefused = false
   private var authFailedOnce = false
+  /// Set after two consecutive auth failures. Reconnects continue, but at the
+  /// slow `Config.Daemon.reconnectAuthFailureDelay` cadence.
+  private var authRejected = false
   /// Max bytes buffered before a newline arrives — prevents runaway growth
   /// if the peer writes garbage.
   private static let maxBufferBytes = 256 * 1024
@@ -85,6 +88,10 @@ final class DaemonIPCClient: DaemonIPC, @unchecked Sendable {
       cancelReconnect()
       tearDown()
       reconnectDelay = Config.Daemon.reconnectBaseDelay
+      // An explicit reconnect is a fresh start: clear the auth-failure state so
+      // a newly installed helper is not judged by the previous one's rejection.
+      authFailedOnce = false
+      authRejected = false
       shouldReconnect = true
       startConnection()
     }
@@ -351,6 +358,7 @@ final class DaemonIPCClient: DaemonIPC, @unchecked Sendable {
       state = .connected
       reconnectDelay = Config.Daemon.reconnectBaseDelay
       authFailedOnce = false
+      authRejected = false
       // Helper's MotionMonitor session counter resets on every (re)launch, so
       // a fresh auth means the cached `_motionSession` from a previous helper
       // instance is no longer a valid lower bound — reset it.
@@ -372,8 +380,17 @@ final class DaemonIPCClient: DaemonIPC, @unchecked Sendable {
       scheduleReconnect()
     } else {
       Logger.daemon.error("Authentication failed twice — code signing verification rejected")
-      shouldReconnect = false
+      // Back off hard, but do NOT give up for good. `reconnectNow()` has exactly
+      // one call site — the .helperInstallCompleted observer, and that
+      // notification is posted only by HelperInstallService.autoInstall — so a
+      // user who resolves this any other way (installing the helper PKG by hand,
+      // re-signing the app) got no retry at all: every helper-backed protection
+      // stayed off, Settings kept showing "(requires Helper)", and only quitting
+      // and relaunching recovered, with nothing in the UI saying so.
+      authRejected = true
+      authFailedOnce = false
       tearDown()
+      scheduleReconnect()
     }
   }
 
@@ -407,8 +424,16 @@ final class DaemonIPCClient: DaemonIPC, @unchecked Sendable {
     guard shouldReconnect else { return }
     cancelReconnect()
 
-    let delay = reconnectDelay
-    reconnectDelay = min(reconnectDelay * 2, Config.Daemon.reconnectMaxDelay)
+    // A code-signing rejection gets a flat, slow cadence rather than the normal
+    // exponential backoff, which would otherwise collapse straight back to
+    // reconnectMaxDelay on the following attempt.
+    let delay: TimeInterval
+    if authRejected {
+      delay = Config.Daemon.reconnectAuthFailureDelay
+    } else {
+      delay = reconnectDelay
+      reconnectDelay = min(reconnectDelay * 2, Config.Daemon.reconnectMaxDelay)
+    }
 
     let timer = DispatchSource.makeTimerSource(queue: queue)
     timer.schedule(deadline: .now() + delay)

@@ -21,6 +21,9 @@ final class LidMonitorService {
   }
 
   func start() {
+    // Idempotent: assigning over a live DispatchSourceTimer does not cancel it,
+    // so a second start() would leave the first orphaned and still firing.
+    guard timer == nil else { return }
     let newTimer = DispatchSource.makeTimerSource(queue: .main)
     newTimer.schedule(deadline: .now(), repeating: checkInterval)
     newTimer.setEventHandler { [weak self] in
@@ -40,8 +43,21 @@ final class LidMonitorService {
     Logger.lid.info("Stopped")
   }
 
+  /// Synchronous read for one-shot queries (status command, sleep handler).
+  ///
+  /// Falls back to the last observed state on IOKit failure; `false` (open) is
+  /// the answer only when no valid value has ever been read.
+  ///
+  /// The fallback is the point. `TheftProtectionService+SleepWake` gates
+  /// `activateTheftMode` on this value, and an IORegistry read is most likely to
+  /// fail during exactly the clamshell sleep transition that handler runs in —
+  /// so coercing nil to "open" drops a real lid-close theft: no siren, no screen
+  /// lock, no Telegram alert. `checkState()` skips the tick on nil for the same
+  /// reason; this path has no tick to skip, so it reuses what it last saw.
   var isClosed: Bool {
-    Self.getClamshellState()
+    guard let current = Self.readClamshellState() else { return lastState ?? false }
+    lastState = current
+    return current
   }
 
   private func checkState() {
@@ -58,13 +74,6 @@ final class LidMonitorService {
     }
 
     lastState = currentState
-  }
-
-  /// Synchronous read for one-shot queries (status command, sleep handler).
-  /// Falls back to the last observed state on IOKit failure; defaults to
-  /// `false` (open) only if we've never read a valid value.
-  nonisolated private static func getClamshellState() -> Bool {
-    readClamshellState() ?? false
   }
 
   nonisolated private static func readClamshellState() -> Bool? {

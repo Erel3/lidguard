@@ -136,6 +136,13 @@ struct SettingsView: View {
       helperNeedsUpdate = TheftProtectionService.helperNeedsUpdate
       helperDisconnectedForUpdate = TheftProtectionService.helperDisconnectedForUpdate
       helperAccessibilityGranted = TheftProtectionService.helperAccessibilityGranted
+      // Restored with the rest, not left at its optimistic `true` default. Only
+      // the .helperStatusChanged handler wrote it, so opening Settings before
+      // that round-trip landed showed the Motion toggle on hardware that cannot
+      // do it: enabling it arms nothing (startMonitors and recalibrateMotion both
+      // gate on daemonClient.motionSupported) while activeTriggerNames still
+      // advertises "motion" in the arm message and every /status reply.
+      motionSupported = TheftProtectionService.daemonMotionSupported
     }
     .onReceive(NotificationCenter.default.publisher(for: .daemonConnectionChanged)) { _ in
       isDaemonConnected = TheftProtectionService.daemonConnected
@@ -152,6 +159,17 @@ struct SettingsView: View {
     .onReceive(NotificationCenter.default.publisher(for: .helperStatusChanged)) { _ in
       helperAccessibilityGranted = TheftProtectionService.helperAccessibilityGranted
       motionSupported = TheftProtectionService.daemonMotionSupported
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .bluetoothSettingsChanged)) { _ in
+      // AppDelegate's menu-bar item and the global shortcut mutate this setting
+      // directly. Without re-reading it, the @State copy taken once in
+      // loadSettings() goes stale and saveSettings() writes the stale value back
+      // — silently reverting a toggle the user made while this window was open.
+      // Worse when already .enabledBluetooth: the save also posts
+      // .bluetoothSettingsChanged, whose handler stops the BLE service, so the
+      // Mac stays armed with scanning dead and the trusted device returning can
+      // never auto-disarm it.
+      bluetoothAutoArmEnabled = settings.bluetoothAutoArmEnabled
     }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
       NotificationCenter.default.post(name: .helperStatusRequested, object: nil)
@@ -396,6 +414,12 @@ struct SettingsView: View {
     if !settings.setupComplete {
       settings.setupComplete = true
     }
+
+    // Posted last, once every trigger/behavior value above is written.
+    // startMonitors() latches these at arm time, so without this a change saved
+    // while armed is advertised by activeTriggerNames()/activeBehaviorNames()
+    // (which read live) but never actually started.
+    NotificationCenter.default.post(name: .armedSettingsChanged, object: nil)
 
     ActivityLog.logAsync(.system, "Settings saved")
   }

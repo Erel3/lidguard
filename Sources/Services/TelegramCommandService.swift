@@ -27,6 +27,9 @@ final class TelegramCommandService {
   private let pollInterval: TimeInterval
   private var isPolling = false
   private var seeded = false
+  /// Bumped by every `start()` and `stop()`, so an in-flight `seedLastUpdateId`
+  /// completion can tell whether it still belongs to the current run.
+  private var startGeneration = 0
 
   init(session: URLSession? = nil,
        pollInterval: TimeInterval = 3.0) {
@@ -47,9 +50,21 @@ final class TelegramCommandService {
       return
     }
 
+    startGeneration &+= 1
+    let gen = startGeneration
+
     // Seed lastUpdateId from newest update so cold start / token change doesn't replay backlog.
     seedLastUpdateId { [weak self] in
       guard let self else { return }
+      // The seed is a network round-trip, and .telegramSettingsChanged fires
+      // stop()+start() on every settings save — so by the time this lands the
+      // user may have switched Telegram OFF. stop() bumps the generation, and
+      // the enabled re-check covers a toggle that never went through stop().
+      // Without both, this completion re-arms the 3s poll loop for good: the
+      // credentials are still in the Keychain, so a /disable or /stop from
+      // Telegram keeps disarming protection after the user turned Telegram off.
+      guard gen == self.startGeneration,
+            Config.Telegram.isConfigured, Config.Telegram.isEnabled else { return }
       self.seeded = true
       self.schedulePolling(initialDeadline: .now())
       Logger.telegram.info("Command polling started")
@@ -60,6 +75,8 @@ final class TelegramCommandService {
   func stop() {
     timer?.cancel()
     timer = nil
+    // Invalidates any in-flight seed completion.
+    startGeneration &+= 1
     // Reset so bot-token change doesn't strand us with stale offset for a different bot.
     lastUpdateId = nil
     seeded = false
@@ -117,6 +134,10 @@ final class TelegramCommandService {
 
   private func pollUpdates() {
     guard seeded else { return }
+    // Belt and braces with the generation check in start(): the credentials stay
+    // in the Keychain when Telegram is switched off, so botToken/chatId alone
+    // never stop this loop dispatching remote commands.
+    guard Config.Telegram.isEnabled else { return }
     guard !isPolling else { return }
     guard let botToken = Config.Telegram.botToken,
           let chatId = Config.Telegram.chatId else { return }

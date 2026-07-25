@@ -94,7 +94,13 @@ extension LocationService: @preconcurrency CLLocationManagerDelegate {
   func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
     Logger.location.error("Error: \(error.localizedDescription)")
     ActivityLog.logAsync(.location, "Location error: \(error.localizedDescription)")
-    complete(with: nil)
+    // Fall back to the last fix, as the timeout path already does.
+    // kCLErrorLocationUnknown is routine in clamshell (Wi-Fi scanning degrades
+    // with the lid shut) — precisely when the device is stolen and the tracking
+    // update matters most. Completing with nil there ships the owner a Telegram
+    // message reading "Location: unavailable", and persists nil lat/lng into the
+    // outbox, while a fix from seconds earlier sits unused in cachedLocation.
+    complete(with: cachedLocation)
   }
 
   func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

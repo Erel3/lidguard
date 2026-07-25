@@ -46,6 +46,11 @@ enum Config {
     static let port: UInt16 = 51423
     static let reconnectBaseDelay: TimeInterval = 2
     static let reconnectMaxDelay: TimeInterval = 30
+    /// Retry cadence after the helper's code-signing check has been rejected
+    /// twice. Deliberately slow — a rejected helper is not something to hammer —
+    /// but never zero: giving up entirely leaves every helper-backed protection
+    /// off until the app is relaunched, with nothing in the UI saying so.
+    static let reconnectAuthFailureDelay: TimeInterval = 300
     static let minHelperVersion = "1.2.4"
     static let helperInstallDir = "Library/Application Support/LidGuard"
     static let helperBinaryName = "lidguard-helper"

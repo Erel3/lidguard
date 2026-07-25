@@ -79,13 +79,12 @@ final class MultipartBodyTests: XCTestCase {
 
   func testVideoFieldAndFilename() {
     let bytes = Data([0x00, 0x00, 0x00, 0x18])
-    let body = MultipartBody.make(boundary: "B", fields: [("chat_id", "1")],
-                                  fileData: bytes, fieldName: "video", filename: "lidguard.mov",
-                                  contentType: "video/quicktime")
-    let text = String(decoding: body, as: UTF8.self)
-    XCTAssertTrue(text.contains("name=\"video\""), "Video field name must be 'video'")
-    XCTAssertTrue(text.contains("filename=\"lidguard.mov\""), "Filename must be lidguard.mov")
-    XCTAssertTrue(text.contains("video/quicktime"), "Content-Type must be video/quicktime")
-    XCTAssertNotNil(body.range(of: bytes), "Raw video bytes must appear verbatim")
+    let b = MultipartBody.make(boundary: "B", fields: [("chat_id", "1")],
+                               fileData: bytes, fieldName: "video", filename: "lidguard.mov",
+                               contentType: "video/quicktime")
+    XCTAssertTrue(body(b, contains: "name=\"video\""), "Video field name must be 'video'")
+    XCTAssertTrue(body(b, contains: "filename=\"lidguard.mov\""), "Filename must be lidguard.mov")
+    XCTAssertTrue(body(b, contains: "video/quicktime"), "Content-Type must be video/quicktime")
+    XCTAssertNotNil(b.range(of: bytes), "Raw video bytes must appear verbatim")
   }
 }

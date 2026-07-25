@@ -21,6 +21,9 @@ final class AlarmAudioManager {
     guard !isPlaying else { return }
     isPlaying = true
 
+    // Must happen before playSiren/playSystemSound claims `audioEngine`.
+    invalidatePreview()
+
     audioController.captureAndMaximize { [weak self] in
       self?.isPlaying ?? false
     }
@@ -76,13 +79,36 @@ final class AlarmAudioManager {
       return
     }
 
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-      guard let self = self, gen == self.previewGeneration else { return }
+    // The identity check is not redundant with the generation check — it is the
+    // one that cannot be defeated by a future caller forgetting to bump the
+    // generation, which is exactly how this closure came to tear down the real
+    // alarm engine.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak engine] in
+      guard let self = self, gen == self.previewGeneration,
+            let engine = engine, self.audioEngine === engine else { return }
       self.audioEngine?.stop()
       self.audioEngine = nil
       self.sourceNode = nil
       self.previewActive = false
     }
+  }
+
+  /// Disarms an in-flight preview teardown and releases its engine.
+  ///
+  /// `previewSiren()` schedules a +1.5s closure that stops and nils `audioEngine`.
+  /// The real alarm reuses that same field, so without this the preview's timer
+  /// tears down the ALARM engine about a second into a genuine theft siren —
+  /// leaving `isPlaying == true` (menu and Telegram keyboard both offer "Stop
+  /// Alarm") with nothing audible, and `stop()` a no-op on the already-nil engine.
+  private func invalidatePreview() {
+    guard previewActive else { return }
+    previewGeneration &+= 1     // disarms the pending teardown
+    previewActive = false
+    // Still the preview's engine at this point — the caller has not claimed the
+    // field yet — so stopping it here is what keeps it from leaking.
+    audioEngine?.stop()
+    audioEngine = nil
+    sourceNode = nil
   }
 
   // MARK: - Siren

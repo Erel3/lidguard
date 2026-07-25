@@ -24,18 +24,21 @@ extension TheftProtectionService: GlobalShortcutDelegate {
 
 // MARK: - BluetoothProximityDelegate
 extension TheftProtectionService: BluetoothProximityDelegate {
-  func bluetoothProximityAllDevicesLost(_ service: BluetoothProximityService) {
-    guard SettingsService.shared.bluetoothAutoArmEnabled else { return }
-    guard state == .disabled else { return }
+  /// Returns whether protection was actually armed — the service re-offers while
+  /// this is false, so declining here is not final.
+  func bluetoothProximityAllDevicesLost(_ service: BluetoothProximityService) -> Bool {
+    guard SettingsService.shared.bluetoothAutoArmEnabled else { return false }
+    guard state == .disabled else { return false }
 
     if let lastDisarm = lastManualDisarmTime,
        Date().timeIntervalSince(lastDisarm) < 300 {
       Logger.bluetooth.info("Skipping auto-arm — manual disarm cooldown active")
       ActivityLog.logAsync(.bluetooth, "Auto-arm suppressed (manual disarm cooldown)")
-      return
+      return false
     }
 
     enableProtectionBluetooth()
+    return true
   }
 
   func bluetoothProximityDeviceReturned(_ service: BluetoothProximityService, device: TrustedBLEDevice) {

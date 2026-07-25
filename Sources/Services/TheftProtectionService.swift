@@ -80,6 +80,15 @@ final class TheftProtectionService {
   /// Grace period after arming during which motion triggers are suppressed.
   static let motionArmGrace: TimeInterval = 3
 
+  /// A persisted theft record older than this is discarded rather than resumed.
+  /// `TheftStateRecord.startedAt` exists to bound exactly this; a power-off
+  /// during theft mode is answered within a day or it is not a live incident.
+  static let theftRecordMaxAge: TimeInterval = 24 * 60 * 60
+  /// Tolerance for a record dated slightly in the future (clock adjustment on
+  /// wake). Beyond this the timestamp is untrustworthy, and a record that can
+  /// never age out is worse than one discarded early.
+  static let theftRecordClockSkew: TimeInterval = 5 * 60
+
   private(set) var state: ProtectionState = .disabled
 
   init(notificationService: NotificationService? = nil,
@@ -119,6 +128,9 @@ final class TheftProtectionService {
     }
     center.addObserver(forName: .motionSettingsChanged, object: nil, queue: .main) { [weak self] _ in
       MainActor.assumeIsolated { self?.handleMotionSettingsChange() }
+    }
+    center.addObserver(forName: .armedSettingsChanged, object: nil, queue: .main) { [weak self] _ in
+      MainActor.assumeIsolated { self?.reconcileMonitors() }
     }
     center.addObserver(forName: .bluetoothSettingsChanged, object: nil, queue: .main) { [weak self] _ in
       MainActor.assumeIsolated {
@@ -265,6 +277,35 @@ final class TheftProtectionService {
       daemonClient.enableMotionMonitoring()
     }
     lastArmTime = Date()
+  }
+
+  /// Bring every monitor into line with the current settings while armed.
+  ///
+  /// `startMonitors()` reads settings ONCE, at arm time, but
+  /// `activeTriggerNames()`/`activeBehaviorNames()` read them live. Before this
+  /// existed, only motion had a mid-arm handler, so enabling "Power disconnect
+  /// detection" while already armed left `powerMonitor` stopped — unplugging the
+  /// charger did nothing — while `/status` and the arm message both listed
+  /// "power disconnect" as active. Same silent gap for lid close and lid-close
+  /// sleep prevention.
+  ///
+  /// Every call below is idempotent, so this is safe to run on each save.
+  private func reconcileMonitors() {
+    guard state == .enabled || state == .enabledBluetooth else { return }
+    let settings = SettingsService.shared
+
+    if settings.behaviorSleepPrevention { sleepPrevention.enable() } else { sleepPrevention.disable() }
+    if settings.triggerLidClose { lidMonitor.start() } else { lidMonitor.stop() }
+    if settings.triggerPowerDisconnect { powerMonitor.start() } else { powerMonitor.stop() }
+
+    // Daemon features
+    if settings.behaviorLidCloseSleep { daemonClient.enablePmset() } else { daemonClient.disablePmset() }
+    if settings.triggerPowerButton {
+      daemonClient.enablePowerButton()
+    } else {
+      daemonClient.disablePowerButton()
+    }
+    handleMotionSettingsChange()
   }
 
   /// Re-arm motion monitoring with a fresh baseline. Called after returning
@@ -473,9 +514,29 @@ final class TheftProtectionService {
   /// re-enter theft mode. Only resumes after a user login (the app launches via
   /// SMAppService login item) — pre-login resume would need a privileged daemon.
   func resumeTheftModeIfNeeded() {
-    guard SettingsService.shared.restoreTheftModeEnabled else { return }
     guard state == .disabled else { return }
     guard let record = theftStateStore.load(), record.state == "theftMode" else { return }
+
+    // Load the record BEFORE the settings gate. Returning early on the gate left
+    // it on disk forever — disableProtection only clears from .enabled/
+    // .enabledBluetooth, and deactivateTheftMode is unreachable when the app
+    // relaunched in .disabled — so re-enabling the setting weeks later resurrected
+    // a long-resolved incident: siren, STOLEN overlay, "DEVICE POWERED BACK ON"
+    // alert and a 20s tracking loop. If we will not resume it, delete it.
+    guard SettingsService.shared.restoreTheftModeEnabled else {
+      theftStateStore.clear()
+      return
+    }
+
+    guard record.isResumable(now: Date(),
+                             maxAge: Self.theftRecordMaxAge,
+                             clockSkew: Self.theftRecordClockSkew) else {
+      theftStateStore.clear()
+      let age = Int(Date().timeIntervalSince(record.startedAt))
+      Logger.theft.warning("Discarded theft record aged \(age)s — outside resume window")
+      ActivityLog.logAsync(.theft, "Stale theft record discarded (not resumed)")
+      return
+    }
 
     stateBeforeTheft = .enabled
     state = .theftMode
@@ -525,10 +586,17 @@ final class TheftProtectionService {
   /// Best-effort: any failure is logged and ignored; never blocks tracking.
   func capturePhotoIfEnabled(caption: String) {
     guard state == .theftMode, SettingsService.shared.photoCaptureEnabled else { return }
+    let episode = theftEpisodeId
     camera.capturePhoto { [weak self] data in
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
-          guard let self, self.state == .theftMode else { return }
+          // The episode check matters as much as the state check, exactly as in
+          // captureVideoIfEnabled. Camera warm-up plus watchdog is up to ~6s;
+          // within it the owner can authenticate (deactivateTheftMode clears the
+          // outbox) and a second trigger re-enter theft mode. On `state` alone
+          // this guard passes, and a frame of the OWNER from the closed incident
+          // is filed and sent as "Thief photo" for the new one.
+          guard let self, self.state == .theftMode, self.theftEpisodeId == episode else { return }
           guard let data else {
             ActivityLog.logAsync(.theft, "Thief photo capture failed")
             return

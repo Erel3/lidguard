@@ -67,6 +67,18 @@ extension TheftProtectionService: DaemonIPCDelegate {
       && (state == .enabled || state == .enabledBluetooth) {
       client.enableMotionMonitoring()
     }
+    // Re-issue the SYSTEM lock, not just the overlay. `DaemonIPCClient.send()`
+    // queues only in .connecting/.authenticating and drops outright in
+    // .disconnected, so a theft trigger that fired while the helper was down —
+    // its 30s idle exit, or an update restarting it, against a reconnect backoff
+    // of up to Config.Daemon.reconnectMaxDelay — never reached
+    // SACLockScreenImmediate. Without this the thief keeps an unlocked desktop
+    // while the app reports theft mode active and streams tracking updates.
+    // Gating matches activateTheftMode (TheftProtectionService.swift:413); the
+    // call is idempotent when the screen is already locked.
+    if state == .theftMode && settings.lockScreenOnTheftMode {
+      client.lockScreen()
+    }
     if state == .theftMode && settings.lockScreenOnTheftMode && settings.behaviorLockScreen {
       let name = settings.contactName ?? ""
       let phone = settings.contactPhone ?? ""

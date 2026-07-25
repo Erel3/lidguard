@@ -6,6 +6,20 @@ struct TheftStateRecord: Codable, Equatable {
   var state: String      // currently only "theftMode" is persisted
   var trigger: String    // TheftTrigger.description at activation time
   var startedAt: Date
+
+  /// Whether this record is recent enough to resume theft mode from.
+  ///
+  /// `startedAt` exists to bound exactly this: without the check the record has
+  /// no expiry at all, and a long-resolved incident can be resumed weeks later —
+  /// siren, STOLEN overlay, "DEVICE POWERED BACK ON" alert and a tracking loop
+  /// for something already dealt with.
+  ///
+  /// A record dated in the future (clock adjusted backwards on wake) is rejected
+  /// beyond `clockSkew`, because a negative age would otherwise never expire.
+  func isResumable(now: Date, maxAge: TimeInterval, clockSkew: TimeInterval) -> Bool {
+    let age = now.timeIntervalSince(startedAt)
+    return age <= maxAge && age > -clockSkew
+  }
 }
 
 /// Atomic JSON persistence for the active theft-mode record. Best-effort: all disk

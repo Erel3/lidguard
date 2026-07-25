@@ -1,6 +1,11 @@
 excluded:
   - .build
+  - .xcodebuild   # SPM checkouts of third-party deps land here
   - dist
+  # Standalone `#!/usr/bin/env swift` generator, in no SwiftPM target and never
+  # shipped. Its `try!`s are deliberate fail-fast: the only useful outcome of a
+  # failed icon build is a crash with the reason.
+  - Scripts
 
 disabled_rules:
   - trailing_comma

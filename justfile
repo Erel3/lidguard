@@ -60,12 +60,12 @@ release:
     rm -f RELEASE_NOTES.md
     echo "Released v$VERSION"
 
-# Run swiftlint --strict on Sources/
+# Run swiftlint --strict on the whole tree (exclusions live in .swiftlint.yml)
 lint:
     #!/usr/bin/env bash
     set -euo pipefail
     TOOLCHAIN_DIR=$(dirname "$(dirname "$(xcrun --find swiftc)")")
-    DYLD_FRAMEWORK_PATH="$TOOLCHAIN_DIR/lib" swiftlint lint --strict Sources/
+    DYLD_FRAMEWORK_PATH="$TOOLCHAIN_DIR/lib" swiftlint lint --strict .
 
 # Run unit tests (SwiftPM test target)
 test *ARGS:

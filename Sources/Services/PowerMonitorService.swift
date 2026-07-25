@@ -13,9 +13,17 @@ final class PowerMonitorService {
 
   private var runLoopSource: CFRunLoopSource?
   private var wasCharging: Bool?
-  private var hasBattery = true
+
+  /// nil = not yet determined, true = a battery has been seen, false = confirmed
+  /// batteryless (Mac Studio / Pro / mini). Tri-state because an empty power-source
+  /// list cannot be read without it — see `readACConnected()`.
+  private var batteryPresence: Bool?
 
   func start() {
+    // Idempotent: a second CFRunLoopAddSource without removing the first leaves
+    // two live notification sources delivering duplicate ticks.
+    guard runLoopSource == nil else { return }
+
     // Initialize state BEFORE adding the runloop source. If the source
     // fires synchronously during CFRunLoopAddSource, a nil `wasCharging`
     // would drop a legitimate disconnect on the first tick.
@@ -36,7 +44,7 @@ final class PowerMonitorService {
     }
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
 
-    if !hasBattery {
+    if batteryPresence == false {
       Logger.power.info("No battery detected — power-disconnect trigger inactive")
     }
     Logger.power.info("Started (AC: \(charging.map(String.init) ?? "unknown"))")
@@ -73,15 +81,29 @@ final class PowerMonitorService {
           let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [Any]
     else { return nil }
 
-    guard let source = sources.first,
-          let info = IOPSGetPowerSourceDescription(snapshot, source as CFTypeRef)?
-            .takeUnretainedValue() as? [String: Any]
-    else {
-      // No internal battery (Mac Studio, Mac Pro, Mac mini) — always on AC.
-      hasBattery = false
+    guard let source = sources.first else {
+      // An empty list is ambiguous. A batteryless Mac has no power source to
+      // report — but neither does a laptop for a moment around sleep/wake and
+      // power-source transitions. Only a machine we have never seen a battery on
+      // may be called "always on AC"; once one has been seen, an empty list is a
+      // transient failure, and coercing it to `true` here makes the NEXT valid
+      // on-battery read look like an AC disconnect — firing a full false theft
+      // trigger (siren, STOLEN overlay, Telegram alert) on a machine nobody
+      // touched. That is the coercion the contract above forbids.
+      guard batteryPresence != true else { return nil }
+      batteryPresence = false
       return true
     }
 
+    guard let info = IOPSGetPowerSourceDescription(snapshot, source as CFTypeRef)?
+            .takeUnretainedValue() as? [String: Any]
+    else {
+      // A source exists but its description is unreadable: transient, and it says
+      // nothing about whether this Mac has a battery. Never latch presence here.
+      return nil
+    }
+
+    batteryPresence = true
     return info[kIOPSPowerSourceStateKey] as? String == kIOPSACPowerValue
   }
 

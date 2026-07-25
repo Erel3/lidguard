@@ -16,7 +16,12 @@ struct TrustedBLEDevice: Codable, Identifiable, Equatable {
 
 @MainActor
 protocol BluetoothProximityDelegate: AnyObject {
-  func bluetoothProximityAllDevicesLost(_ service: BluetoothProximityService)
+  /// Returns `true` if the delegate actually armed.
+  ///
+  /// `false` means it declined — auto-arm switched off, wrong protection state,
+  /// or the manual-disarm cooldown — and the service must keep offering as those
+  /// conditions change, rather than treating the first offer as final.
+  func bluetoothProximityAllDevicesLost(_ service: BluetoothProximityService) -> Bool
   func bluetoothProximityDeviceReturned(_ service: BluetoothProximityService, device: TrustedBLEDevice)
 }
 
@@ -36,6 +41,11 @@ final class BluetoothProximityService: NSObject {
   private var lastSeenTime: [UUID: Date] = [:]
   private var nearDevices: Set<UUID> = []
   private var allDevicesLostNotified = false
+  /// When auto-arm was last offered to the delegate while all devices were gone.
+  /// nil once an offer is accepted, or a trusted device returns.
+  private var lastAutoArmOffer: Date?
+  /// How often to re-offer auto-arm while the delegate keeps declining.
+  private static let autoArmRetryInterval: TimeInterval = 60
   private var btRecoveryUntil: Date?
   private var cachedTrustedDevices: [TrustedBLEDevice] = []
   private var cachedTrustedIDs: Set<UUID> = []
@@ -318,10 +328,24 @@ final class BluetoothProximityService: NSObject {
       }
       return
     }
+    // Re-offer on a cadence rather than once. The delegate can decline for a
+    // reason that lapses — the 300s manual-disarm cooldown, most often — and
+    // this used to latch BEFORE asking, so a decline stuck the flag on for good:
+    // handleDeviceReturned is the only place that clears it, leaving the Mac
+    // permanently unarmed until a trusted device came back into range and left
+    // again. The interval keeps a standing decline (auto-arm simply off) from
+    // logging on every scan cycle.
+    if let last = lastAutoArmOffer, now.timeIntervalSince(last) < Self.autoArmRetryInterval {
+      return
+    }
+    lastAutoArmOffer = now
+
+    guard let delegate, delegate.bluetoothProximityAllDevicesLost(self) else { return }
+
     allDevicesLostNotified = true
+    lastAutoArmOffer = nil
     Logger.bluetooth.info("All trusted devices gone for \(Int(armDelay))s, triggering auto-arm")
     ActivityLog.logAsync(.bluetooth, "All devices out of range for \(Int(armDelay))s — auto-arming")
-    notifyDelegate { $0.bluetoothProximityAllDevicesLost(self) }
   }
 
   private func handleDeviceReturned(currentNear: Set<UUID>) {
@@ -329,6 +353,7 @@ final class BluetoothProximityService: NSObject {
     Logger.bluetooth.info("Trusted device returned: \(device.name)")
     ActivityLog.logAsync(.bluetooth, "Device returned: \(device.name)")
     allDevicesLostNotified = false
+    lastAutoArmOffer = nil
     notifyDelegate { $0.bluetoothProximityDeviceReturned(self, device: device) }
   }
 
